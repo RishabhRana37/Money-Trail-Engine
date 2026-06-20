@@ -1,0 +1,10 @@
+.venv/
+.vercel/
+scratch/
+data/
+models/
+metrics.json
+train.py
+backend/engine/__pycache__/
+backend/__pycache__/
+frontend/node_modules/
