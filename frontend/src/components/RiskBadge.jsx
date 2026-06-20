@@ -16,36 +16,36 @@ export function getRiskProperties(levelOrScore) {
 
   const configs = {
     low: {
-      text: 'Low Risk',
-      bg: 'bg-aura-low/10',
-      border: 'border-aura-low/30',
-      textColor: 'text-aura-low',
-      bullet: 'bg-aura-low',
-      hex: '#3FB950'
+      text: 'LOW',
+      bg: 'bg-emerald-950/20',
+      border: 'border-emerald-500/40',
+      textColor: 'text-emerald-400',
+      bullet: 'bg-emerald-400',
+      hex: '#0F9960'
     },
     medium: {
-      text: 'Medium Risk',
-      bg: 'bg-aura-medium/10',
-      border: 'border-aura-medium/30',
-      textColor: 'text-aura-medium',
-      bullet: 'bg-aura-medium',
-      hex: '#D29922'
+      text: 'MEDIUM',
+      bg: 'bg-amber-950/20',
+      border: 'border-amber-500/40',
+      textColor: 'text-amber-400',
+      bullet: 'bg-amber-400',
+      hex: '#FFAE00'
     },
     high: {
-      text: 'High Risk',
-      bg: 'bg-aura-high/10',
-      border: 'border-aura-high/30',
-      textColor: 'text-aura-high',
-      bullet: 'bg-aura-high',
-      hex: '#F0883E'
+      text: 'HIGH',
+      bg: 'bg-orange-950/20',
+      border: 'border-orange-500/40',
+      textColor: 'text-orange-400',
+      bullet: 'bg-orange-400',
+      hex: '#FF7300'
     },
     critical: {
-      text: 'Critical Risk',
-      bg: 'bg-aura-critical/10',
-      border: 'border-aura-critical/30',
-      textColor: 'text-aura-critical',
-      bullet: 'bg-aura-critical animate-pulse',
-      hex: '#F85149'
+      text: 'CRITICAL',
+      bg: 'bg-red-950/20',
+      border: 'border-red-500/40',
+      textColor: 'text-red-400',
+      bullet: 'bg-red-400 animate-pulse',
+      hex: '#FF3B30'
     }
   };
 
@@ -55,12 +55,12 @@ export function getRiskProperties(levelOrScore) {
 export default function RiskBadge({ level, score, showScore = true }) {
   const value = score !== undefined ? score : level;
   const config = getRiskProperties(value);
-  const displayScore = score !== undefined ? `(${score})` : '';
+  const displayScore = score !== undefined ? `:${score}` : '';
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${config.bg} ${config.border} ${config.textColor}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${config.bullet}`}></span>
-      <span>{config.text} {showScore && displayScore}</span>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 border rounded-none font-mono text-[10px] tracking-wider uppercase select-none ${config.bg} ${config.border} ${config.textColor}`}>
+      <span className={`w-1.5 h-1.5 rounded-none ${config.bullet}`}></span>
+      <span>[LVL_{config.text}{displayScore}]</span>
     </span>
   );
 }

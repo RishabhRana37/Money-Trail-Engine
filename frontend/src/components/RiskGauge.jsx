@@ -10,7 +10,6 @@ export default function RiskGauge({ score = 0, size = 150 }) {
   const circumference = 2 * Math.PI * r;
 
   useEffect(() => {
-    // Animate the dial progress on load
     const progressOffset = circumference - (score / 100) * circumference;
     const timer = setTimeout(() => {
       setOffset(progressOffset);
@@ -21,55 +20,73 @@ export default function RiskGauge({ score = 0, size = 150 }) {
   return (
     <div className="flex flex-col items-center justify-center select-none" style={{ width: size, height: size }}>
       <div className="relative" style={{ width: size, height: size }}>
-        {/* Glow backdrop ring */}
+        {/* Sonar sweep backdrop effect */}
         <div 
-          className="absolute inset-0 rounded-full opacity-10 blur-xl transition-all duration-1000"
-          style={{ backgroundColor: config.hex }}
+          className="absolute inset-2 rounded-full opacity-[0.03] border border-dashed animate-spin"
+          style={{ borderColor: varColor(config.hex), animationDuration: '20s' }}
         />
         
         <svg 
           viewBox="0 0 100 100" 
           className="w-full h-full transform -rotate-90 select-none"
         >
-          {/* Inner grey track */}
+          {/* Compass grid lines */}
+          <line x1="50" y1="6" x2="50" y2="12" stroke="#1F2836" strokeWidth="0.5" />
+          <line x1="50" y1="88" x2="50" y2="94" stroke="#1F2836" strokeWidth="0.5" />
+          <line x1="6" y1="50" x2="12" y2="50" stroke="#1F2836" strokeWidth="0.5" />
+          <line x1="88" y1="50" x2="94" y2="50" stroke="#1F2836" strokeWidth="0.5" />
+
+          {/* Inner tick indicator ring */}
           <circle
             cx="50"
             cy="50"
             r={r}
-            stroke="#21262D"
-            strokeWidth="6"
+            stroke="#1F2836"
+            strokeWidth="4"
             fill="transparent"
-            className="transition-colors duration-500"
+            strokeDasharray="2 4"
           />
+
           {/* Active colored progress ring */}
           <circle
             cx="50"
             cy="50"
             r={r}
             stroke={config.hex}
-            strokeWidth="6"
+            strokeWidth="3"
             strokeDasharray={circumference}
             strokeDashoffset={offset}
-            strokeLinecap="round"
+            strokeLinecap="square"
             fill="transparent"
             className="transition-all duration-1000 ease-out"
-            style={{ filter: `drop-shadow(0 0 2px ${config.hex}80)` }}
+            style={{ filter: `drop-shadow(0 0 1.5px ${config.hex}60)` }}
           />
         </svg>
 
-        {/* Center Text */}
+        {/* Center Text displaying status */}
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="font-mono text-3xl font-bold tracking-tight text-white leading-none">
-            {score}
+          <span className="font-mono text-2xl font-bold tracking-tighter text-white leading-none">
+            {score.toString().padStart(3, '0')}
           </span>
           <span 
-            className="text-[10px] tracking-wider uppercase font-semibold mt-1"
+            className="text-[8px] tracking-widest font-mono uppercase mt-1 font-bold"
             style={{ color: config.hex }}
           >
-            {config.text.split(' ')[0]}
+            {config.text}
           </span>
         </div>
+
+        {/* Tactical orientation markers */}
+        <span className="absolute top-1 left-1/2 transform -translate-x-1/2 text-[6px] font-mono text-aura-textMuted">000</span>
+        <span className="absolute bottom-1 left-1/2 transform -translate-x-1/2 text-[6px] font-mono text-aura-textMuted">180</span>
+        <span className="absolute left-1 top-1/2 transform -translate-y-1/2 text-[6px] font-mono text-aura-textMuted">270</span>
+        <span className="absolute right-1 top-1/2 transform -translate-y-1/2 text-[6px] font-mono text-aura-textMuted">090</span>
       </div>
     </div>
   );
+}
+
+// helper to handle hex colors in standard CSS styles
+function varColor(hex) {
+  return hex;
 }
