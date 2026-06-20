@@ -1,5 +1,5 @@
 # AURA — Anti-Money-Laundering Unified Risk Analytics
-### 🛡️ AI-Powered Financial Crime Investigation & Interactive Money Trail Engine
+### AI-Powered Financial Crime Investigation & Interactive Money Trail Engine
 
 ---
 
@@ -28,7 +28,7 @@
 
 ---
 
-## 🔍 The Problem
+## The Problem
 
 Traditional anti-money laundering (AML) platforms suffer from structural flaws that compromise security operations:
 * **The Static Rule Trap:** Basic threshold limits (e.g., flagging transactions over 50,000 INR) are easily evaded by split transactions (**smurfing**).
@@ -40,7 +40,7 @@ Traditional anti-money laundering (AML) platforms suffer from structural flaws t
 
 ---
 
-## ⚡ Core Features
+##  Core Features
 
 | Feature | Description | Implementation Details |
 | :--- | :--- | :--- |
@@ -54,7 +54,7 @@ Traditional anti-money laundering (AML) platforms suffer from structural flaws t
 
 ---
 
-## 📐 Architecture and Data Flow
+##  Architecture and Data Flow
 
 ```mermaid
 graph TD
@@ -84,7 +84,7 @@ graph TD
 
 ---
 
-## 🧠 Detection Engine & ML
+##  Detection Engine & ML
 
 AURA features a dual-layer detection pipeline utilizing custom feature engineering, machine learning classifiers, and NetworkX structural analysis.
 
@@ -113,7 +113,7 @@ The UI renders these contributions as **SHAP-Lite** bar graphs, explaining preci
 
 ---
 
-## 📁 Repository Layout
+##  Repository Layout
 
 ```
 Money-Trail-Engine/
@@ -147,7 +147,7 @@ Money-Trail-Engine/
 
 ---
 
-## 🔌 API Endpoints
+##  API Endpoints
 
 AURA exposes a comprehensive set of REST APIs defined in `backend/models.py`:
 
@@ -165,7 +165,7 @@ AURA exposes a comprehensive set of REST APIs defined in `backend/models.py`:
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 * **Node.js:** v18.0 or higher
@@ -216,7 +216,7 @@ This saves `trained_model.pkl` directly inside `backend/engine/`, which AURA wil
 
 ---
 
-## 🔮 Roadmap
+##  Roadmap
 
 - [x] **Phase 1: Hybrid AML Detection Core**
   - Directed Graph traversal algorithms for circular routing and layering detection.
@@ -233,7 +233,7 @@ This saves `trained_model.pkl` directly inside `backend/engine/`, which AURA wil
 
 ---
 
-## 📄 License
+##  License
 This project is licensed under the MIT License.
 
 ---
