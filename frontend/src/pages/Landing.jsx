@@ -749,6 +749,9 @@ export default function Landing() {
           
           {/* Relocated Primary Action Area */}
           <div className="w-80 flex flex-col justify-center items-start pointer-events-auto select-none">
+            <h2 className="font-mono text-5xl md:text-6xl font-extrabold text-[#00ffcc]/80 tracking-[0.22em] hover:text-[#00ffcc] hover:tracking-[0.32em] transition-all duration-500 ease-out cursor-default select-none mb-6 filter drop-shadow-[0_0_8px_rgba(0,255,204,0.5)] hover:drop-shadow-[0_0_20px_rgba(0,255,204,0.95)] transform hover:scale-[1.02]">
+              AURA
+            </h2>
             <button
               onClick={handleGetStarted}
               className="group flex items-center gap-2.5 font-mono text-xs uppercase tracking-[0.2em] px-8 py-4 border border-cyan-400/50 text-cyan-400 bg-cyan-950/15 hover:bg-cyan-400/20 active:scale-95 active:bg-cyan-400/30 duration-200 rounded shadow-[0_0_15px_rgba(0,229,255,0.08)] hover:shadow-[0_0_25px_rgba(0,229,255,0.3)] hover:border-cyan-400 transition-all ease-in-out cursor-pointer"
