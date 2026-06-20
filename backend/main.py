@@ -13,7 +13,8 @@ from backend.models import (
     StatsResponse, TopRiskAccount, AccountsListResponse, AccountSummary,
     AccountDetailResponse, ExplanationFactor, CounterpartySummary, TimelineItem,
     GraphResponse, GraphNode, GraphEdge, AlertsListResponse, AlertSummary,
-    AlertAccountInfo, AlertDetailResponse, ErrorResponse
+    AlertAccountInfo, AlertDetailResponse, ErrorResponse,
+    LoadRealDatasetRequest
 )
 from backend.store import DATASETS, DatasetState
 from backend.generator import generate_synthetic_dataset
@@ -95,6 +96,128 @@ def generate_dataset(req: GenerateDatasetRequest = None):
         num_transactions=len(state.transactions),
         fraud_rings_injected=len(state.ground_truth_rings),
         ready=True
+    )
+
+# New Endpoint: POST /dataset/load_real
+@app.post("/dataset/load_real", response_model=UploadDatasetResponse)
+def load_real_dataset(req: LoadRealDatasetRequest = None):
+    if req is None:
+        req = LoadRealDatasetRequest()
+        
+    import os
+    if not os.path.exists(req.file_path):
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "file_not_found", "message": f"Real dataset file not found at {req.file_path}."}
+        )
+        
+    dataset_id = f"ds_real_{int(time.time()) % 1000:03d}"
+    state = DatasetState(dataset_id)
+    
+    # Streaming parser to sample file and prioritize fraud
+    import json
+    limit = req.limit
+    max_fraud = int(limit * req.fraud_priority_ratio)
+    
+    fraud_txns = []
+    normal_txns = []
+    warnings = []
+    
+    try:
+        with open(req.file_path, "r", encoding="utf-8") as f:
+            # Skip opening bracket
+            char = f.read(1)
+            while char and char != '[':
+                char = f.read(1)
+                
+            buffer = []
+            in_object = False
+            
+            for line in f:
+                stripped = line.strip()
+                if stripped == "{" or stripped == "{,":
+                    in_object = True
+                    buffer = ["{"]
+                elif in_object:
+                    buffer.append(line)
+                    if stripped == "}" or stripped == "}," or stripped == "},":
+                        in_object = False
+                        obj_str = "".join(buffer).rstrip(" \t\r\n,")
+                        try:
+                            txn = json.loads(obj_str)
+                            is_fraud = txn.get("is_fraud", False)
+                            
+                            mapped_txn = {
+                                "txn_id": txn.get("transaction_id", f"txn_{len(fraud_txns) + len(normal_txns) + 1}"),
+                                "from_account": txn.get("sender_account"),
+                                "to_account": txn.get("receiver_account"),
+                                "amount": float(txn.get("amount", 0.0)),
+                                "timestamp": txn.get("timestamp"),
+                                "transaction_type": txn.get("transaction_type", "transfer"),
+                                "location": txn.get("location"),
+                                "device_used": txn.get("device_used"),
+                                "ip_address": txn.get("ip_address"),
+                                "is_fraud": bool(is_fraud)
+                            }
+                            
+                            try:
+                                ts_str = mapped_txn["timestamp"]
+                                if ts_str:
+                                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                    mapped_txn["timestamp"] = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                            except ValueError:
+                                pass
+                                
+                            if not mapped_txn["from_account"] or not mapped_txn["to_account"]:
+                                continue
+                                
+                            if is_fraud:
+                                if len(fraud_txns) < max_fraud:
+                                    fraud_txns.append(mapped_txn)
+                                    state.ground_truth_dirty_accounts.add(mapped_txn["from_account"])
+                                    state.ground_truth_dirty_accounts.add(mapped_txn["to_account"])
+                            else:
+                                if len(normal_txns) < limit:
+                                    normal_txns.append(mapped_txn)
+                        except Exception as e:
+                            warnings.append(f"Skipped invalid transaction JSON: {str(e)}")
+                        buffer = []
+                        
+                if len(fraud_txns) >= max_fraud and len(normal_txns) >= limit - len(fraud_txns):
+                    break
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "ingestion_failed", "message": f"Error reading dataset file: {str(e)}"}
+        )
+        
+    state.transactions = (fraud_txns + normal_txns[:limit - len(fraud_txns)])[:limit]
+    
+    # Populate accounts in DatasetState
+    for txn in state.transactions:
+        from_acc = txn["from_account"]
+        to_acc = txn["to_account"]
+        
+        for acc in [from_acc, to_acc]:
+            if acc not in state.accounts:
+                state.accounts[acc] = {
+                    "account_id": acc,
+                    "name": f"Account {acc}",
+                    "account_type": "shell" if acc in state.ground_truth_dirty_accounts else "individual",
+                    "initial_balance": 500000.0
+                }
+                
+    fraud_rings_injected = sum(1 for t in state.transactions if t.get("is_fraud"))
+    
+    DATASETS[dataset_id] = state
+    
+    return UploadDatasetResponse(
+        dataset_id=dataset_id,
+        num_accounts=len(state.accounts),
+        num_transactions=len(state.transactions),
+        fraud_rings_injected=fraud_rings_injected,
+        ready=True,
+        warnings=warnings[:10]
     )
 
 # 2. POST /dataset/upload
@@ -451,7 +574,11 @@ def get_account_detail(account_id: str, dataset_id: str):
                 timestamp=t["timestamp"],
                 amount=amt,
                 direction=direction,
-                counterparty_id=other_id
+                counterparty_id=other_id,
+                transaction_type=t.get("transaction_type"),
+                location=t.get("location"),
+                device_used=t.get("device_used"),
+                ip_address=t.get("ip_address")
             ))
             
     # Format counterparties (combine directions or show dominant? shape expects amount + direction)
@@ -571,6 +698,17 @@ def get_graph(
         if node_id in state.accounts:
             acc = state.accounts[node_id]
             risk = state.accounts_scored[node_id]
+            
+            # Aggregate unique locations, devices, IPs for this node
+            node_locs = set()
+            node_devs = set()
+            node_ips = set()
+            for t in state.transactions:
+                if t["from_account"] == node_id or t["to_account"] == node_id:
+                    if t.get("location"): node_locs.add(t["location"])
+                    if t.get("device_used"): node_devs.add(t["device_used"])
+                    if t.get("ip_address"): node_ips.add(t["ip_address"])
+                    
             nodes.append(GraphNode(
                 id=node_id,
                 label=acc["name"],
@@ -578,7 +716,10 @@ def get_graph(
                 risk_score=risk["risk_score"],
                 risk_level=risk["risk_level"],
                 is_center=(node_id == center_id),
-                flagged=(risk["risk_score"] >= 70)
+                flagged=(risk["risk_score"] >= 70),
+                locations=list(node_locs) if node_locs else None,
+                devices=list(node_devs) if node_devs else None,
+                ip_addresses=list(node_ips) if node_ips else None
             ))
             
     # Generate graph edges (aggregate transactions between selected nodes)
@@ -595,12 +736,21 @@ def get_graph(
                 edges_map[key] = {
                     "amount": 0.0,
                     "txn_count": 0,
-                    "last_ts": t["timestamp"]
+                    "last_ts": t["timestamp"],
+                    "locations": set(),
+                    "devices": set(),
+                    "ip_addresses": set(),
+                    "transaction_types": set()
                 }
             edges_map[key]["amount"] += amt
             edges_map[key]["txn_count"] += 1
             if t["timestamp"] > edges_map[key]["last_ts"]:
                 edges_map[key]["last_ts"] = t["timestamp"]
+                
+            if t.get("location"): edges_map[key]["locations"].add(t["location"])
+            if t.get("device_used"): edges_map[key]["devices"].add(t["device_used"])
+            if t.get("ip_address"): edges_map[key]["ip_addresses"].add(t["ip_address"])
+            if t.get("transaction_type"): edges_map[key]["transaction_types"].add(t["transaction_type"])
                 
     edges = []
     for (u, v), data in edges_map.items():
@@ -620,7 +770,11 @@ def get_graph(
             amount=round(data["amount"], 2),
             txn_count=data["txn_count"],
             last_timestamp=data["last_ts"],
-            suspicious=suspicious
+            suspicious=suspicious,
+            locations=list(data["locations"]) if data["locations"] else None,
+            devices=list(data["devices"]) if data["devices"] else None,
+            ip_addresses=list(data["ip_addresses"]) if data["ip_addresses"] else None,
+            transaction_types=list(data["transaction_types"]) if data["transaction_types"] else None
         ))
         
     return GraphResponse(

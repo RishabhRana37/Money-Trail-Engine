@@ -176,6 +176,7 @@ def generate_synthetic_dataset(
             txn_counter += 1
             
     state.transactions.extend(normal_txns)
+    num_normal_txns = len(state.transactions)
     
     # 4. Inject fraud patterns
     fraud_patterns = ["circular", "layering", "smurfing", "fan_in", "rapid_movement"]
@@ -460,6 +461,36 @@ def generate_synthetic_dataset(
                 "initial_balance": float(np.random.lognormal(mean=11.0, sigma=1.2))
             }
             
+    # Enrich transactions with new fields (consistent with the real database schema)
+    cities = ["Mumbai", "Delhi", "Bengaluru", "Kolkata", "Chennai", "Hyderabad", "Pune", "Ahmedabad", "London", "Toronto", "Tokyo"]
+    devices = ["mobile", "desktop", "tablet", "atm"]
+    
+    for idx, txn in enumerate(state.transactions):
+        # Determine is_fraud
+        is_fraud = idx >= num_normal_txns
+        
+        # Determine transaction type
+        from_acc = txn["from_account"]
+        to_acc = txn["to_account"]
+        from_type = state.accounts.get(from_acc, {}).get("account_type", "individual")
+        to_type = state.accounts.get(to_acc, {}).get("account_type", "individual")
+        
+        if from_type == "business" and to_type == "individual":
+            txn_type = "salary"
+        elif from_type == "individual" and to_type == "business":
+            txn_type = "payment"
+        elif is_fraud:
+            txn_type = "transfer"
+        else:
+            txn_type = random.choice(["transfer", "payment"])
+            
+        # Random location, device, IP
+        txn["transaction_type"] = txn_type
+        txn["location"] = random.choice(cities)
+        txn["device_used"] = random.choice(devices)
+        txn["is_fraud"] = is_fraud
+        txn["ip_address"] = f"{random.randint(12, 223)}.{random.randint(10, 250)}.{random.randint(5, 250)}.{random.randint(1, 254)}"
+
     # Sort transactions by timestamp to keep it realistic
     state.transactions.sort(key=lambda x: x["timestamp"])
     

@@ -18,7 +18,8 @@ def compute_anomaly_scores(df: pd.DataFrame) -> Dict[str, float]:
         "total_in", "total_out", "txn_count", "fan_in", "fan_out",
         "pass_through_ratio", "mean_time_to_forward", "mule_ratio",
         "structuring_score", "round_amount_ratio", "betweenness_centrality",
-        "in_degree", "out_degree"
+        "in_degree", "out_degree",
+        "unique_locations_count", "unique_devices_count", "unique_ips_count", "ip_sharing_count"
     ]
     
     # Fill any NaNs with 0

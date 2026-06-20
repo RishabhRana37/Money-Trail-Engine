@@ -18,8 +18,14 @@ def compute_features(accounts: Dict[str, Dict[str, Any]], transactions: List[Dic
             "in_txns": [],
             "out_txns": [],
             "structuring_count": 0,
-            "round_amount_count": 0
+            "round_amount_count": 0,
+            "locations": set(),
+            "devices": set(),
+            "ips": set()
         }
+        
+    # Map IP to accounts
+    ip_to_accounts = {}
         
     # Process transactions to populate basic counters
     for txn in transactions:
@@ -39,6 +45,14 @@ def compute_features(accounts: Dict[str, Dict[str, Any]], transactions: List[Dic
         # Round amount check (multiple of 5000 or 10000)
         is_round = (amount % 5000 == 0) or (amount % 10000 == 0)
         
+        # Track IP sharing
+        ip = txn.get("ip_address")
+        if ip:
+            if ip not in ip_to_accounts:
+                ip_to_accounts[ip] = set()
+            ip_to_accounts[ip].add(from_acc)
+            ip_to_accounts[ip].add(to_acc)
+            
         if from_acc in feature_dict:
             f = feature_dict[from_acc]
             f["total_out"] += amount
@@ -49,6 +63,12 @@ def compute_features(accounts: Dict[str, Dict[str, Any]], transactions: List[Dic
                 f["structuring_count"] += 1
             if is_round:
                 f["round_amount_count"] += 1
+            if "location" in txn and txn["location"]:
+                f["locations"].add(txn["location"])
+            if "device_used" in txn and txn["device_used"]:
+                f["devices"].add(txn["device_used"])
+            if "ip_address" in txn and txn["ip_address"]:
+                f["ips"].add(txn["ip_address"])
                 
         if to_acc in feature_dict:
             f = feature_dict[to_acc]
@@ -60,6 +80,12 @@ def compute_features(accounts: Dict[str, Dict[str, Any]], transactions: List[Dic
                 f["structuring_count"] += 1
             if is_round:
                 f["round_amount_count"] += 1
+            if "location" in txn and txn["location"]:
+                f["locations"].add(txn["location"])
+            if "device_used" in txn and txn["device_used"]:
+                f["devices"].add(txn["device_used"])
+            if "ip_address" in txn and txn["ip_address"]:
+                f["ips"].add(txn["ip_address"])
 
     # NetworkX Graph construction for centrality
     G = nx.DiGraph()
@@ -126,6 +152,11 @@ def compute_features(accounts: Dict[str, Dict[str, Any]], transactions: List[Dic
         structuring_score = f["structuring_count"] / txn_count if txn_count > 0 else 0.0
         round_amount_ratio = f["round_amount_count"] / txn_count if txn_count > 0 else 0.0
         
+        # IP sharing count
+        ip_sharing_count = 0
+        for ip in f["ips"]:
+            ip_sharing_count += len(ip_to_accounts.get(ip, set())) - 1
+            
         rows.append({
             "account_id": acc_id,
             "total_in": total_in,
@@ -140,7 +171,11 @@ def compute_features(accounts: Dict[str, Dict[str, Any]], transactions: List[Dic
             "round_amount_ratio": round_amount_ratio,
             "betweenness_centrality": betweenness.get(acc_id, 0.0),
             "in_degree": in_degree.get(acc_id, 0),
-            "out_degree": out_degree.get(acc_id, 0)
+            "out_degree": out_degree.get(acc_id, 0),
+            "unique_locations_count": len(f["locations"]) if f["locations"] else 1,
+            "unique_devices_count": len(f["devices"]) if f["devices"] else 1,
+            "unique_ips_count": len(f["ips"]) if f["ips"] else 1,
+            "ip_sharing_count": ip_sharing_count
         })
         
     df = pd.DataFrame(rows)

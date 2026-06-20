@@ -60,6 +60,10 @@ def fuse_risk_scores(
         # Weights: 45% anomaly, 35% pattern severity, 20% centrality
         raw_risk = (0.45 * anomaly_score) + (0.35 * pattern_severity) + (0.20 * centrality_score)
         
+        # Boost risk if the unsupervised anomaly score is high, even without structured graph alerts
+        if anomaly_score > 70:
+            raw_risk = max(raw_risk, anomaly_score)
+            
         # Clamp & Integer
         risk_score = min(100, max(0, int(round(raw_risk))))
         
@@ -112,6 +116,10 @@ def fuse_risk_scores(
         mule_ratio = row["mule_ratio"]
         pass_through = row["pass_through_ratio"]
         structuring = row["structuring_score"]
+        unique_locs = row.get("unique_locations_count", 1)
+        unique_devs = row.get("unique_devices_count", 1)
+        unique_ips = row.get("unique_ips_count", 1)
+        ip_sharing = row.get("ip_sharing_count", 0)
         
         if mule_ratio > 0.7 and pass_through > 0.8:
             explanation.append({
@@ -124,6 +132,27 @@ def fuse_risk_scores(
             explanation.append({
                 "factor": "Structuring Signature",
                 "detail": f"{structuring*100:.0f}% of transactions fall in the 45k-50k threshold evasion band.",
+                "contribution": 0
+            })
+            
+        if unique_locs > 3:
+            explanation.append({
+                "factor": "Geographic Dispersion",
+                "detail": f"Account accessed across {int(unique_locs)} geographically distinct locations, indicating credential sharing or anomalous access.",
+                "contribution": 0
+            })
+            
+        if unique_devs > 3:
+            explanation.append({
+                "factor": "Device Proliferation",
+                "detail": f"Account accessed via {int(unique_devs)} distinct hardware devices.",
+                "contribution": 0
+            })
+            
+        if ip_sharing > 1:
+            explanation.append({
+                "factor": "Shared IP Network",
+                "detail": f"IP addresses used by this account are shared with {int(ip_sharing)} other distinct accounts, indicating a common operator or device farm.",
                 "contribution": 0
             })
             

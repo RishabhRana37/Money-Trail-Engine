@@ -36,6 +36,12 @@ class UploadDatasetResponse(BaseModel):
     ready: bool
     warnings: List[str] = []
 
+class LoadRealDatasetRequest(BaseModel):
+    file_path: Optional[str] = Field(default="D:/transactions.json")
+    limit: Optional[int] = Field(default=50000, ge=1)
+    fraud_priority_ratio: Optional[float] = Field(default=0.1, ge=0.0, le=1.0)
+
+
 # 3. /analyze
 class AnalyzeRequest(BaseModel):
     dataset_id: str
@@ -102,6 +108,10 @@ class TimelineItem(BaseModel):
     amount: float
     direction: DirectionType
     counterparty_id: str
+    transaction_type: Optional[str] = None
+    location: Optional[str] = None
+    device_used: Optional[str] = None
+    ip_address: Optional[str] = None
 
 # 6. /accounts/{account_id}
 class AccountDetailResponse(BaseModel):
@@ -129,6 +139,9 @@ class GraphNode(BaseModel):
     risk_level: RiskLevel
     is_center: bool
     flagged: bool
+    locations: Optional[List[str]] = None
+    devices: Optional[List[str]] = None
+    ip_addresses: Optional[List[str]] = None
 
 class GraphEdge(BaseModel):
     id: str
@@ -138,6 +151,10 @@ class GraphEdge(BaseModel):
     txn_count: int
     last_timestamp: str  # ISO 8601 UTC
     suspicious: bool
+    locations: Optional[List[str]] = None
+    devices: Optional[List[str]] = None
+    ip_addresses: Optional[List[str]] = None
+    transaction_types: Optional[List[str]] = None
 
 # 7. /graph
 class GraphResponse(BaseModel):
