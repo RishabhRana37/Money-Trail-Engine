@@ -60,6 +60,30 @@ try:
     # Fuse risk
     risk_results = fuse_risk_scores(features_df, anomaly_scores, alerts)
     
+    # Compute stats
+    total_amount = sum(float(t["amount"]) for t in default_state.transactions)
+    high_risk_accounts = sum(1 for acc in risk_results.values() if acc["risk_score"] >= 70)
+    amount_flagged = sum(a["amount_involved"] for a in alerts)
+    
+    patterns_found = {
+        "circular": 0, "layering": 0, "smurfing": 0,
+        "rapid_movement": 0, "fan_in": 0, "fan_out": 0
+    }
+    for alert in alerts:
+        ptype = alert["pattern_type"]
+        if ptype in patterns_found:
+            patterns_found[ptype] += 1
+            
+    default_state.stats = {
+        "dataset_id": default_state.dataset_id,
+        "total_accounts": len(default_state.accounts),
+        "total_transactions": len(default_state.transactions),
+        "total_amount": round(total_amount, 2),
+        "high_risk_accounts": high_risk_accounts,
+        "amount_flagged": round(amount_flagged, 2),
+        "alerts_by_type": patterns_found
+    }
+    
     default_state.features_df = features_df
     default_state.accounts_scored = risk_results
     default_state.alerts = alerts_dict
