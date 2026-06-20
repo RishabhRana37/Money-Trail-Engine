@@ -41,6 +41,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Seed default dataset on startup so the UI works immediately
+try:
+    print("[AURA] Seeding default dataset 'ds_001' on startup...")
+    default_state = generate_synthetic_dataset(num_accounts=150, num_transactions=1400, fraud_intensity="medium", seed=42)
+    default_state.dataset_id = "ds_001"
+    
+    # Run analysis
+    features_df = compute_features(default_state.accounts, default_state.transactions)
+    anomaly_scores = compute_anomaly_scores(features_df)
+    alerts = detect_patterns(default_state.accounts, default_state.transactions, features_df)
+    
+    # Format alerts as dict for storage
+    alerts_dict = {}
+    for alert in alerts:
+        alerts_dict[alert["alert_id"]] = alert
+        
+    # Fuse risk
+    risk_results = fuse_risk_scores(features_df, anomaly_scores, alerts)
+    
+    default_state.features_df = features_df
+    default_state.accounts_scored = risk_results
+    default_state.alerts = alerts_dict
+    default_state.analyzed = True
+    
+    DATASETS["ds_001"] = default_state
+    print("[AURA] Default dataset 'ds_001' successfully seeded.")
+except Exception as e:
+    print(f"[AURA] Warning: Error seeding default dataset on startup: {e}")
+
 # Exception handlers for clean JSON errors matching API Contract
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
