@@ -674,6 +674,19 @@ export default function Landing() {
     t.type.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Play custom local audio feedback cleanly
+  const playClickSound = () => {
+    try {
+      const audio = new Audio('/click.mp3');
+      audio.currentTime = 0;
+      audio.play().catch(err => {
+        console.warn('Audio playback failed or was blocked by browser:', err);
+      });
+    } catch (e) {
+      console.error('Audio initialization failed:', e);
+    }
+  };
+
   // Trigger imploding visual effect on authenticate click
   const handleAuthenticate = () => {
     // Zoom camera in (handled by temporary transition before navigating)
@@ -684,6 +697,12 @@ export default function Landing() {
         navigate('/login');
       }
     });
+  };
+
+  // Relocated Get Started button click handler
+  const handleGetStarted = () => {
+    playClickSound();
+    handleAuthenticate();
   };
 
   return (
@@ -711,12 +730,6 @@ export default function Landing() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate('/login')}
-              className="font-mono text-[10px] uppercase tracking-widest px-4 py-2 border border-cyan-400/40 text-cyan-400 hover:bg-cyan-400/10 active:scale-95 duration-200 rounded"
-            >
-              Get Started
-            </button>
-            <button
-              onClick={() => navigate('/login')}
               className="p-1.5 text-slate-400 hover:text-white transition-colors"
               title="System Menu"
             >
@@ -734,56 +747,16 @@ export default function Landing() {
         {/* Middle contents: Sidebar & coordinates legend */}
         <div className="flex-1 flex overflow-hidden px-8 py-2 justify-between items-stretch">
           
-          {/* Tactical Left Targets Sidebar */}
-          <aside className="w-80 glass-panel border border-white/5 p-5 flex flex-col pointer-events-auto rounded-xl">
-            <div className="flex justify-between items-center mb-3">
-              <span className="font-mono text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" /> TARGETING QUEUE
-              </span>
-              <span className="font-mono text-[9px] text-slate-600 uppercase font-bold">GRID LOCK</span>
-            </div>
-
-            {/* Target Search */}
-            <div className="relative mb-4">
-              <input
-                type="text"
-                placeholder="Search active vectors..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-black/30 border border-white/5 focus:border-cyan-400/30 outline-none text-xs font-mono py-2 pl-3 pr-8 text-white rounded-lg"
-              />
-              <span className="absolute right-2.5 top-2.5 text-[9px] opacity-40">⚙️</span>
-            </div>
-
-            {/* Target Item Grid */}
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-              {filteredTargets.map(tgt => {
-                const isSelected = selectedTarget && selectedTarget.id === tgt.id;
-                const statusColor = tgt.status === 'ENGAGE' ? 'text-red-400 border-red-500/20' : tgt.status === 'FIX' ? 'text-amber-400 border-amber-500/20' : 'text-cyan-400 border-cyan-500/20';
-                
-                return (
-                  <div
-                    key={tgt.id}
-                    onClick={() => setSelectedTarget(tgt)}
-                    className={`p-3 border rounded-lg cursor-pointer transition-all duration-200 ${isSelected ? 'border-cyan-400 bg-cyan-950/20 shadow-[0_0_12px_rgba(0,229,255,0.08)]' : 'border-white/5 hover:border-white/10 bg-black/10'}`}
-                  >
-                    <div className="flex justify-between items-start mb-1.5">
-                      <span className="font-mono text-[11px] font-bold text-white block truncate max-w-[150px]">{tgt.name}</span>
-                      <span className="font-mono text-[9px] text-cyan-400/50">{tgt.risk}</span>
-                    </div>
-                    <div className="flex items-center justify-between mb-2 text-[9px] text-slate-500">
-                      <span>{tgt.type}</span>
-                      <span className="font-mono">{tgt.id}</span>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-white/5 pt-2 font-mono text-[8px]">
-                      <span className={`px-2 py-0.5 border rounded-full uppercase font-bold text-[7px] ${statusColor}`}>{tgt.status}</span>
-                      <span className="text-slate-600 truncate max-w-[100px]">{tgt.hash}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </aside>
+          {/* Relocated Primary Action Area */}
+          <div className="w-80 flex flex-col justify-center items-start pointer-events-auto select-none">
+            <button
+              onClick={handleGetStarted}
+              className="group flex items-center gap-2.5 font-mono text-xs uppercase tracking-[0.2em] px-8 py-4 border border-cyan-400/50 text-cyan-400 bg-cyan-950/15 hover:bg-cyan-400/20 active:scale-95 active:bg-cyan-400/30 duration-200 rounded shadow-[0_0_15px_rgba(0,229,255,0.08)] hover:shadow-[0_0_25px_rgba(0,229,255,0.3)] hover:border-cyan-400 transition-all ease-in-out cursor-pointer"
+            >
+              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping group-hover:bg-white group-hover:shadow-[0_0_8px_#00E5FF] transition-all" />
+              Get Started
+            </button>
+          </div>
 
           {/* Coordinate Readout overlay */}
           <div className="hidden lg:flex flex-col justify-between items-end p-4 text-right font-mono text-[9px] text-slate-500">
