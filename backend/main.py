@@ -22,10 +22,13 @@ from backend.engine.anomaly import compute_anomaly_scores
 from backend.engine.patterns import detect_patterns
 from backend.engine.risk import fuse_risk_scores
 
+import os
+
 app = FastAPI(
     title="AURA API — Anti-money-laundering Unified Risk Analytics",
     description="Backend API exposing synthetic generation, unsupervised anomaly detection, and graph analytics.",
-    version="1.0.0"
+    version="1.0.0",
+    root_path="/api" if os.environ.get("VERCEL") else ""
 )
 
 # CORS Configuration - essential for frontend connectivity
