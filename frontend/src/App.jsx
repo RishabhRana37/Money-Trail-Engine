@@ -17,15 +17,23 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(
     () => sessionStorage.getItem('aura_auth') === 'true'
   );
+  const [operator, setOperator] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('aura_operator') || 'null'); } catch { return null; }
+  });
 
-  const handleLogin = () => {
+  const handleLogin = (op) => {
+    const info = op || { name: 'Operator', clearance: 'ALPHA-II', id: 'unknown' };
     sessionStorage.setItem('aura_auth', 'true');
+    sessionStorage.setItem('aura_operator', JSON.stringify(info));
     setIsAuthenticated(true);
+    setOperator(info);
   };
 
   const handleLogout = () => {
     sessionStorage.removeItem('aura_auth');
+    sessionStorage.removeItem('aura_operator');
     setIsAuthenticated(false);
+    setOperator(null);
   };
 
   const handleResetDataset = async () => {
@@ -61,6 +69,7 @@ function App() {
         onResetDataset={handleResetDataset}
         isGenerating={isGenerating}
         onLogout={handleLogout}
+        operator={operator}
       />
 
       {isGenerating && (
@@ -78,7 +87,8 @@ function App() {
       <main className="flex-1 flex flex-col">{children}</main>
 
       <footer className="border-t border-aura-border bg-aura-panel/50 py-4 text-center text-xs font-mono text-aura-textMuted">
-        AURA Consolidated Ops Console &bull; Security Level: Alpha-III &bull; Seed: 42
+        AURA Consolidated Ops Console &bull; Security Level: {operator?.clearance || 'Alpha-III'} &bull;
+        {operator ? ` Operator: ${operator.name} ·` : ''} Seed: 42
       </footer>
     </div>
   );
