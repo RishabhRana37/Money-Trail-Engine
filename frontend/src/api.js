@@ -1,7 +1,7 @@
 import { fakeStats, fakeGraph, fakeAccount, fakeAccountsList, fakeAlerts } from './fixtures';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const USE_REAL_API = import.meta.env.VITE_USE_REAL_API === 'true';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:8000/api');
+const USE_REAL_API = import.meta.env.VITE_USE_REAL_API === 'true' || import.meta.env.PROD;
 
 // Delay helper to make the mock mode feel like a real API with loading states
 const delay = (ms = 500) => new Promise(resolve => setTimeout(resolve, ms));

@@ -62,9 +62,6 @@ export default function Header({ currentDataset, onResetDataset, isGenerating })
             <NavLink to="/" className={({ isActive }) => isActive ? activeClass : inactiveClass}>
               DASHBOARD
             </NavLink>
-            <NavLink to="/graph" className={({ isActive }) => isActive ? activeClass : inactiveClass}>
-              MONEY_TRAIL_MAP
-            </NavLink>
             <NavLink to="/alerts" className={({ isActive }) => isActive ? activeClass : inactiveClass}>
               THREAT_FEED
             </NavLink>
