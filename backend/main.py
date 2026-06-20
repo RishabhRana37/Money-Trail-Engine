@@ -1,909 +1,896 @@
-"""
-AURA — Anti-Money-Laundering Unified Risk Analytics
-FastAPI Backend — implements all 9 API_CONTRACT.md endpoints
-"""
-from __future__ import annotations
-
-import csv
-import io
-import math
-import random
-import uuid
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
-
-import networkx as nx
-from fastapi import FastAPI, File, HTTPException, UploadFile
+import time
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from typing import List, Dict, Any, Optional
+import io
+import csv
+from datetime import datetime
 
-# ─────────────────────────────────────────────────────────────
-# App Setup
-# ─────────────────────────────────────────────────────────────
+from backend.models import (
+    GenerateDatasetRequest, GenerateDatasetResponse,
+    UploadDatasetResponse, AnalyzeRequest, AnalyzeResponse,
+    StatsResponse, TopRiskAccount, AccountsListResponse, AccountSummary,
+    AccountDetailResponse, ExplanationFactor, CounterpartySummary, TimelineItem,
+    GraphResponse, GraphNode, GraphEdge, AlertsListResponse, AlertSummary,
+    AlertAccountInfo, AlertDetailResponse, ErrorResponse,
+    LoadRealDatasetRequest
+)
+from backend.store import DATASETS, DatasetState
+from backend.generator import generate_synthetic_dataset
+from backend.engine.features import compute_features
+from backend.engine.anomaly import compute_anomaly_scores
+from backend.engine.patterns import detect_patterns
+from backend.engine.risk import fuse_risk_scores
+
+import os
+
 app = FastAPI(
-    title="AURA API",
-    description="Anti-Money-Laundering Unified Risk Analytics",
+    title="AURA API — Anti-money-laundering Unified Risk Analytics",
+    description="Backend API exposing synthetic generation, unsupervised anomaly detection, and graph analytics.",
     version="1.0.0",
+    root_path="/api" if os.environ.get("VERCEL") else ""
 )
 
+# CORS Configuration - essential for frontend connectivity
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tightened post-launch if needed
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ─────────────────────────────────────────────────────────────
-# In-Memory Store
-# ─────────────────────────────────────────────────────────────
-_store: dict[str, dict] = {}  # dataset_id → DatasetStore
+# Exception handlers for clean JSON errors matching API Contract
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    # If the detail is a dict, parse it directly, otherwise treat as simple string
+    error_code = "bad_request"
+    message = str(exc.detail)
+    
+    if isinstance(exc.detail, dict):
+        error_code = exc.detail.get("error", "bad_request")
+        message = exc.detail.get("message", message)
+        
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": error_code, "message": message}
+    )
 
-# ─────────────────────────────────────────────────────────────
-# Pydantic Models
-# ─────────────────────────────────────────────────────────────
-class GenerateRequest(BaseModel):
-    num_accounts: int = 200
-    num_transactions: int = 2500
-    fraud_intensity: str = "medium"
-    seed: int = 42
-
-class AnalyzeRequest(BaseModel):
-    dataset_id: str
-
-# ─────────────────────────────────────────────────────────────
-# Constants & Helpers
-# ─────────────────────────────────────────────────────────────
-FIRST_NAMES = [
-    "Aarav", "Vivaan", "Aditya", "Vihaan", "Arjun", "Sai", "Reyansh", "Ishaan",
-    "Karan", "Rohit", "Neel", "Rahul", "Rajan", "Vikram", "Priya", "Anita",
-    "Meera", "Sunita", "Kavya", "Pooja", "Divya", "Nisha", "Ritu", "Maya",
-    "Amit", "Suresh", "Rajesh", "Dinesh", "Mahesh", "Ganesh", "Naresh", "Ramesh",
-]
-LAST_NAMES = [
-    "Sharma", "Patel", "Singh", "Kumar", "Gupta", "Verma", "Joshi", "Rao",
-    "Agarwal", "Khan", "Shah", "Mehta", "Nair", "Iyer", "Pillai", "Reddy",
-    "Malhotra", "Chopra", "Bose", "Das", "Sen", "Ghosh", "Banerjee", "Mukherjee",
-]
-BUSINESS_NAMES = [
-    "Quikfix Traders", "Maya Holdings", "Apex Ventures", "RoyalTech Solutions",
-    "Prime Capital", "Starline Exports", "BrightPath Enterprises", "NovaTrade Co",
-    "Sunrise Distributors", "Pioneer Logistics", "Unity Finance", "Delta Commerce",
-    "Horizon Imports", "Eagle Trading", "Silver Leaf Corp", "BlueSky Traders",
-    "TrustMark Pvt Ltd", "Global Nexus", "Omega Holdings", "Matrix Commerce",
-]
-
-PATTERN_TYPES = ["circular", "layering", "smurfing", "rapid_movement", "fan_in", "fan_out"]
-
-def risk_level_from_score(score: int) -> str:
-    if score >= 90:
-        return "critical"
-    if score >= 70:
-        return "high"
-    if score >= 40:
-        return "medium"
-    return "low"
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-def _random_past_ts(rng: random.Random, days_back: int = 30) -> datetime:
-    offset = timedelta(seconds=rng.randint(0, days_back * 86400))
-    return _utc_now() - offset
-
-def _ts_str(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-def _random_name(rng: random.Random, acct_type: str) -> str:
-    if acct_type == "shell":
-        return rng.choice(BUSINESS_NAMES)
-    if acct_type == "business":
-        return rng.choice(BUSINESS_NAMES[:10])
-    return f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}"
-
-# ─────────────────────────────────────────────────────────────
-# Synthetic Data Generation
-# ─────────────────────────────────────────────────────────────
-def _generate_dataset(
-    num_accounts: int, num_transactions: int, fraud_intensity: str, seed: int
-) -> dict:
-    rng = random.Random(seed)
-
-    intensity_map = {"low": 1, "medium": 2, "high": 3}
-    rings_count = intensity_map.get(fraud_intensity, 2)
-
-    # ── Build Accounts ──────────────────────────────────────
-    accounts: dict[str, dict] = {}
-    acc_ids: list[str] = []
-    for i in range(num_accounts):
-        acc_id = f"acc_{i:04d}"
-        acc_type = rng.choices(
-            ["individual", "business", "shell"],
-            weights=[65, 25, 10],
-        )[0]
-        accounts[acc_id] = {
-            "account_id": acc_id,
-            "name": _random_name(rng, acc_type),
-            "account_type": acc_type,
-            "risk_score": 0,
-            "risk_level": "low",
-            "flags": [],
-            "total_in": 0.0,
-            "total_out": 0.0,
-            "txn_count": 0,
-            "fan_in": 0,
-            "fan_out": 0,
-            # internals for analysis
-            "_counterparties_in": set(),
-            "_counterparties_out": set(),
-            "_timestamps": [],   # (ts, direction, amount)
-        }
-        acc_ids.append(acc_id)
-
-    transactions: list[dict] = []
-    txn_id_counter = [0]
-
-    def add_txn(frm: str, to: str, amount: float, ts: datetime, suspicious: bool = False):
-        txn_id_counter[0] += 1
-        txn_id = f"txn_{txn_id_counter[0]:05d}"
-        transactions.append({
-            "txn_id": txn_id,
-            "from_account": frm,
-            "to_account": to,
-            "amount": round(amount, 2),
-            "timestamp": ts,
-            "suspicious": suspicious,
-        })
-        acct = accounts[frm]
-        acct["total_out"] += amount
-        acct["txn_count"] += 1
-        acct["_counterparties_out"].add(to)
-        acct["_timestamps"].append((_ts_str(ts), "out", amount))
-
-        acct2 = accounts[to]
-        acct2["total_in"] += amount
-        acct2["txn_count"] += 1
-        acct2["_counterparties_in"].add(frm)
-        acct2["_timestamps"].append((_ts_str(ts), "in", amount))
-
-    # ── Inject Fraud Rings ───────────────────────────────────
-    alerts: list[dict] = []
-    fraud_accounts: set[str] = set()
-    alert_counter = [0]
-
-    def next_alert_id() -> str:
-        alert_counter[0] += 1
-        return f"alert_{alert_counter[0]:02d}"
-
-    # 1. Circular rings
-    for _ in range(rings_count):
-        ring_size = rng.randint(3, 5)
-        ring_members = rng.sample(
-            [a for a in acc_ids if a not in fraud_accounts], ring_size
+# Helper to fetch dataset state
+def get_dataset(dataset_id: str) -> DatasetState:
+    if not dataset_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "bad_request", "message": "dataset_id parameter is required."}
         )
-        fraud_accounts.update(ring_members)
-        base_amount = rng.uniform(500_000, 5_000_000)
-        base_ts = _random_past_ts(rng, 10)
-        for i, acct in enumerate(ring_members):
-            # Make shells
-            accounts[acct]["account_type"] = rng.choice(["shell", "business"])
-            nxt = ring_members[(i + 1) % ring_size]
-            ts = base_ts + timedelta(hours=rng.randint(1, 6) * (i + 1))
-            add_txn(acct, nxt, round(base_amount * rng.uniform(0.95, 1.05), 2), ts, suspicious=True)
-        amount_involved = sum(
-            t["amount"] for t in transactions if t["suspicious"] and
-            t["from_account"] in ring_members
-        )
-        alerts.append({
-            "alert_id": next_alert_id(),
-            "pattern_type": "circular",
-            "title": f"{ring_size}-account laundering loop",
-            "severity": rng.randint(85, 97),
-            "account_ids": ring_members,
-            "amount_involved": round(amount_involved, 2),
-            "summary": f"₹{amount_involved/100_000:.1f}L cycled through {ring_size} accounts returning 99% to origin within 36 hours.",
-            "narrative": f"Funds originated at {accounts[ring_members[0]]['name']}, moved through intermediaries, and returned — a closed loop with no economic purpose.",
-            "detected_at": _ts_str(_utc_now()),
-        })
-
-    # 2. Layering chains
-    for _ in range(rings_count):
-        chain_size = rng.randint(4, 6)
-        chain = rng.sample(
-            [a for a in acc_ids if a not in fraud_accounts], chain_size
-        )
-        fraud_accounts.update(chain)
-        amount = rng.uniform(200_000, 2_000_000)
-        base_ts = _random_past_ts(rng, 15)
-        for i in range(len(chain) - 1):
-            ts = base_ts + timedelta(hours=rng.randint(2, 8) * (i + 1))
-            add_txn(chain[i], chain[i + 1], round(amount * 0.97**i, 2), ts, suspicious=True)
-        amount_inv = sum(t["amount"] for t in transactions[-chain_size + 1:])
-        alerts.append({
-            "alert_id": next_alert_id(),
-            "pattern_type": "layering",
-            "title": f"{chain_size}-hop layering chain",
-            "severity": rng.randint(75, 90),
-            "account_ids": chain,
-            "amount_involved": round(amount_inv, 2),
-            "summary": f"Funds moved through {chain_size} accounts in cascading transfers to obscure origin.",
-            "narrative": f"A chain of transfers designed to distance funds from their source, each hop reducing the trail.",
-            "detected_at": _ts_str(_utc_now()),
-        })
-
-    # 3. Smurfing (structuring below reporting threshold = ₹50,000)
-    if rings_count >= 1:
-        smurf_src = rng.choice([a for a in acc_ids if a not in fraud_accounts])
-        smurf_dst = rng.choice([a for a in acc_ids if a not in fraud_accounts and a != smurf_src])
-        fraud_accounts.update([smurf_src, smurf_dst])
-        num_smurfs = rng.randint(10, 18)
-        base_ts = _random_past_ts(rng, 7)
-        for j in range(num_smurfs):
-            ts = base_ts + timedelta(hours=j * rng.uniform(0.5, 3))
-            add_txn(smurf_src, smurf_dst, round(rng.uniform(44_000, 49_900), 2), ts, suspicious=True)
-        alerts.append({
-            "alert_id": next_alert_id(),
-            "pattern_type": "smurfing",
-            "title": f"Structuring: {num_smurfs} deposits under reporting threshold",
-            "severity": rng.randint(70, 85),
-            "account_ids": [smurf_src, smurf_dst],
-            "amount_involved": round(num_smurfs * 47_000, 2),
-            "summary": f"{num_smurfs} deposits just under ₹50,000 threshold from same source.",
-            "narrative": f"Classic structuring: sender deliberately kept each transfer below ₹50,000 to avoid mandatory reporting.",
-            "detected_at": _ts_str(_utc_now()),
-        })
-
-    # 4. Rapid movement
-    for _ in range(rings_count + 1):
-        rapid_chain = rng.sample(
-            [a for a in acc_ids if a not in fraud_accounts], 3
-        )
-        fraud_accounts.update(rapid_chain)
-        amount = rng.uniform(800_000, 3_000_000)
-        base_ts = _random_past_ts(rng, 5)
-        add_txn(rapid_chain[0], rapid_chain[1], amount, base_ts, suspicious=True)
-        add_txn(rapid_chain[1], rapid_chain[2], round(amount * 0.99, 2), base_ts + timedelta(minutes=rng.randint(15, 90)), suspicious=True)
-        add_txn(rapid_chain[2], rapid_chain[0], round(amount * 0.98, 2), base_ts + timedelta(hours=rng.randint(2, 8)), suspicious=True)
-        alerts.append({
-            "alert_id": next_alert_id(),
-            "pattern_type": "rapid_movement",
-            "title": "Rapid pass-through: funds cleared within hours",
-            "severity": rng.randint(68, 82),
-            "account_ids": rapid_chain,
-            "amount_involved": round(amount, 2),
-            "summary": f"₹{amount/100_000:.1f}L moved through 3 accounts within hours — no economic hold time.",
-            "narrative": "Funds entered and exited each account within hours, a hallmark of transit accounts in layering schemes.",
-            "detected_at": _ts_str(_utc_now()),
-        })
-
-    # 5. Fan-in
-    fan_in_dst = rng.choice([a for a in acc_ids if a not in fraud_accounts])
-    fraud_accounts.add(fan_in_dst)
-    fan_in_srcs = rng.sample([a for a in acc_ids if a not in fraud_accounts], rng.randint(6, 10))
-    for src in fan_in_srcs:
-        add_txn(src, fan_in_dst, round(rng.uniform(10_000, 200_000), 2), _random_past_ts(rng, 20), suspicious=True)
-    alerts.append({
-        "alert_id": next_alert_id(),
-        "pattern_type": "fan_in",
-        "title": f"Fan-in: {len(fan_in_srcs)} sources converging on one account",
-        "severity": rng.randint(60, 78),
-        "account_ids": [fan_in_dst] + fan_in_srcs[:3],
-        "amount_involved": accounts[fan_in_dst]["total_in"],
-        "summary": f"{len(fan_in_srcs)} accounts funnelling funds into a single destination.",
-        "narrative": "Multiple unrelated accounts sending to one recipient — consistent with aggregation before extraction.",
-        "detected_at": _ts_str(_utc_now()),
-    })
-
-    # 6. Fan-out
-    fan_out_src = rng.choice([a for a in acc_ids if a not in fraud_accounts])
-    fraud_accounts.add(fan_out_src)
-    fan_out_dsts = rng.sample([a for a in acc_ids if a not in fraud_accounts], rng.randint(6, 10))
-    for dst in fan_out_dsts:
-        add_txn(fan_out_src, dst, round(rng.uniform(10_000, 150_000), 2), _random_past_ts(rng, 20), suspicious=True)
-    alerts.append({
-        "alert_id": next_alert_id(),
-        "pattern_type": "fan_out",
-        "title": f"Fan-out: single account dispersing to {len(fan_out_dsts)} destinations",
-        "severity": rng.randint(60, 75),
-        "account_ids": [fan_out_src] + fan_out_dsts[:3],
-        "amount_involved": accounts[fan_out_src]["total_out"],
-        "summary": f"One account dispersing funds to {len(fan_out_dsts)} recipients — possible fund distribution after aggregation.",
-        "narrative": "A single account acting as a distribution hub, sending to many destinations with no clear business purpose.",
-        "detected_at": _ts_str(_utc_now()),
-    })
-
-    # ── Legitimate Background Transactions ───────────────────
-    legitimate_needed = max(0, num_transactions - len(transactions))
-    legit_acc = [a for a in acc_ids if a not in fraud_accounts]
-    for _ in range(legitimate_needed):
-        frm = rng.choice(acc_ids)
-        to = rng.choice(acc_ids)
-        if frm == to:
-            continue
-        amount = rng.lognormvariate(10, 1.5)  # realistic skewed distribution
-        ts = _random_past_ts(rng, 30)
-        add_txn(frm, to, round(min(amount, 5_000_000), 2), ts, suspicious=False)
-
-    return {
-        "accounts": accounts,
-        "transactions": transactions,
-        "alerts": alerts,
-        "analyzed": False,
-        "fraud_accounts": fraud_accounts,
-    }
-
-# ─────────────────────────────────────────────────────────────
-# Analysis / Scoring Engine
-# ─────────────────────────────────────────────────────────────
-def _analyze_dataset(ds: dict) -> dict:
-    accounts = ds["accounts"]
-    transactions = ds["transactions"]
-    alerts = ds["alerts"]
-    fraud_accounts = ds["fraud_accounts"]
-
-    # Build directed graph
-    G = nx.DiGraph()
-    for acct in accounts:
-        G.add_node(acct)
-    for t in transactions:
-        frm, to, amt = t["from_account"], t["to_account"], t["amount"]
-        if G.has_edge(frm, to):
-            G[frm][to]["amount"] += amt
-            G[frm][to]["txn_count"] += 1
-        else:
-            G.add_edge(frm, to, amount=amt, txn_count=1, suspicious=t["suspicious"])
-
-    # Mark edges suspicious if any txn in them was suspicious
-    susp_pairs = set()
-    for t in transactions:
-        if t["suspicious"]:
-            susp_pairs.add((t["from_account"], t["to_account"]))
-    for u, v in G.edges():
-        if (u, v) in susp_pairs:
-            G[u][v]["suspicious"] = True
-
-    # Compute fan_in / fan_out
-    for acc_id, acct in accounts.items():
-        acct["fan_in"] = G.in_degree(acc_id)
-        acct["fan_out"] = G.out_degree(acc_id)
-
-    # Flag which accounts appear in alerts
-    flagged_map: dict[str, list[str]] = defaultdict(list)
-    for alert in alerts:
-        for acc_id in alert["account_ids"]:
-            flagged_map[acc_id].append(alert["pattern_type"])
-
-    # Risk scoring
-    for acc_id, acct in accounts.items():
-        score = 0
-
-        # Shell account base
-        if acct["account_type"] == "shell":
-            score += 20
-        elif acct["account_type"] == "business":
-            score += 5
-
-        # Pass-through ratio (funds in vs funds out within short time)
-        if acct["total_in"] > 0:
-            pass_through = min(acct["total_out"] / acct["total_in"], 1.0)
-            score += int(pass_through * 25)
-
-        # Fan-in / fan-out extremes
-        if acct["fan_in"] >= 6:
-            score += 10
-        if acct["fan_out"] >= 6:
-            score += 10
-
-        # Transaction velocity
-        if acct["txn_count"] > 30:
-            score += 10
-        elif acct["txn_count"] > 15:
-            score += 5
-
-        # Pattern flags
-        flags = list(set(flagged_map.get(acc_id, [])))
-        acct["flags"] = flags
-        score += len(flags) * 15
-
-        # Cap and finalize
-        score = min(score, 99)
-        # Fraud accounts get minimum score boost
-        if acc_id in fraud_accounts:
-            score = max(score, 65)
-
-        acct["risk_score"] = score
-        acct["risk_level"] = risk_level_from_score(score)
-
-        # Build explanation for detail view
-        explanation = []
-        if pass_through >= 0.9 and acct["total_in"] > 0:
-            explanation.append({
-                "factor": "Rapid pass-through",
-                "detail": f"{int(pass_through*100)}% of funds left within 24h of arrival",
-                "contribution": 34,
-            })
-        if "circular" in flags:
-            explanation.append({
-                "factor": "Circular flow",
-                "detail": "Member of a closed laundering loop returning funds to origin",
-                "contribution": 28,
-            })
-        if "smurfing" in flags:
-            explanation.append({
-                "factor": "Structuring",
-                "detail": "Multiple deposits just under ₹50,000 reporting threshold",
-                "contribution": 21,
-            })
-        if acct["account_type"] == "shell":
-            explanation.append({
-                "factor": "Shell signature",
-                "detail": "No salary/utility transactions; pure transfer activity",
-                "contribution": 13,
-            })
-        if acct["fan_in"] >= 6:
-            explanation.append({
-                "factor": "Aggregation point",
-                "detail": f"Receives from {acct['fan_in']} distinct accounts — unusual fan-in pattern",
-                "contribution": 10,
-            })
-        acct["_explanation"] = explanation
-
-        # Top counterparties
-        cps_out = [(cp, sum(t["amount"] for t in transactions if t["from_account"] == acc_id and t["to_account"] == cp)) for cp in acct["_counterparties_out"]]
-        cps_in = [(cp, sum(t["amount"] for t in transactions if t["to_account"] == acc_id and t["from_account"] == cp)) for cp in acct["_counterparties_in"]]
-        cps_out.sort(key=lambda x: -x[1])
-        cps_in.sort(key=lambda x: -x[1])
-        top_cps = [
-            {"account_id": cp, "name": accounts[cp]["name"], "amount": round(amt, 2), "direction": "out"}
-            for cp, amt in cps_out[:3]
-        ] + [
-            {"account_id": cp, "name": accounts[cp]["name"], "amount": round(amt, 2), "direction": "in"}
-            for cp, amt in cps_in[:3]
-        ]
-        acct["_top_counterparties"] = top_cps[:5]
-
-        # Timeline (sorted by ts)
-        timeline = []
-        for ts_str, direction, amt in acct["_timestamps"]:
-            if direction == "out":
-                cps = list(acct["_counterparties_out"])
-            else:
-                cps = list(acct["_counterparties_in"])
-            cp_id = cps[0] if cps else ""
-            timeline.append({"timestamp": ts_str, "amount": round(amt, 2), "direction": direction, "counterparty_id": cp_id})
-        timeline.sort(key=lambda x: x["timestamp"])
-        acct["_timeline"] = timeline[:20]  # cap at 20 entries
-
-    # Finalize alerts — add severity_level
-    for alert in alerts:
-        alert["risk_level"] = risk_level_from_score(alert["severity"])
-
-    # Sort alerts by severity
-    alerts.sort(key=lambda a: -a["severity"])
-
-    # Build aggregated edge data for graph queries
-    edge_index: dict[tuple, dict] = {}
-    for t in transactions:
-        key = (t["from_account"], t["to_account"])
-        if key not in edge_index:
-            edge_index[key] = {
-                "id": f"e_{t['from_account']}_{t['to_account']}",
-                "source": t["from_account"],
-                "target": t["to_account"],
-                "amount": 0.0,
-                "txn_count": 0,
-                "last_timestamp": t["timestamp"],
-                "suspicious": False,
-            }
-        edge_index[key]["amount"] += t["amount"]
-        edge_index[key]["txn_count"] += 1
-        if t["suspicious"]:
-            edge_index[key]["suspicious"] = True
-        if t["timestamp"] > edge_index[key]["last_timestamp"]:
-            edge_index[key]["last_timestamp"] = t["timestamp"]
-
-    # Convert timestamps to strings
-    for e in edge_index.values():
-        if isinstance(e["last_timestamp"], datetime):
-            e["last_timestamp"] = _ts_str(e["last_timestamp"])
-        e["amount"] = round(e["amount"], 2)
-
-    ds["edge_index"] = edge_index
-    ds["graph_nx"] = G
-    ds["analyzed"] = True
-    return ds
-
-# ─────────────────────────────────────────────────────────────
-# Graph Builder
-# ─────────────────────────────────────────────────────────────
-def _build_subgraph(ds: dict, account_ids: list[str], center_id: str) -> dict:
-    accounts = ds["accounts"]
-    edge_index = ds["edge_index"]
-
-    id_set = set(account_ids)
-    nodes = []
-    for acc_id in account_ids:
-        if acc_id not in accounts:
-            continue
-        acct = accounts[acc_id]
-        nodes.append({
-            "id": acc_id,
-            "label": acct["name"],
-            "account_type": acct["account_type"],
-            "risk_score": acct["risk_score"],
-            "risk_level": acct["risk_level"],
-            "is_center": acc_id == center_id,
-            "flagged": len(acct["flags"]) > 0,
-        })
-
-    edges = []
-    for (src, tgt), edge in edge_index.items():
-        if src in id_set and tgt in id_set:
-            edges.append(edge)
-
-    return {"center_id": center_id, "nodes": nodes, "edges": edges}
-
-def _get_neighbors(ds: dict, account_id: str, depth: int) -> list[str]:
-    G: nx.DiGraph = ds["graph_nx"]
-    visited = {account_id}
-    frontier = {account_id}
-    for _ in range(depth):
-        next_frontier = set()
-        for node in frontier:
-            next_frontier.update(G.predecessors(node))
-            next_frontier.update(G.successors(node))
-        frontier = next_frontier - visited
-        visited.update(frontier)
-    return list(visited)
-
-# ─────────────────────────────────────────────────────────────
-# Helper to get dataset or 404
-# ─────────────────────────────────────────────────────────────
-def _get_ds(dataset_id: str) -> dict:
-    if dataset_id not in _store:
+    if dataset_id not in DATASETS:
         raise HTTPException(
             status_code=404,
-            detail={"error": "dataset_not_found", "message": f"No dataset with id {dataset_id}. Generate one first."},
+            detail={"error": "dataset_not_found", "message": f"No dataset with id {dataset_id}. Generate one first."}
         )
-    return _store[dataset_id]
+    return DATASETS[dataset_id]
 
-def _require_analyzed(ds: dict):
-    if not ds.get("analyzed"):
-        raise HTTPException(
-            status_code=400,
-            detail={"error": "not_analyzed_yet", "message": "Dataset exists but has not been analyzed. Call POST /analyze first."},
-        )
-
-# ─────────────────────────────────────────────────────────────
-# Endpoints
-# ─────────────────────────────────────────────────────────────
-
-@app.get("/")
-def root():
-    return {"service": "AURA API", "version": "1.0.0", "docs": "/docs"}
-
+# --- Endpoints ---
 
 # 1. POST /dataset/generate
-@app.post("/dataset/generate")
-def generate_dataset(req: GenerateRequest):
-    dataset_id = "ds_001"  # deterministic for demo reproducibility
-    ds = _generate_dataset(req.num_accounts, req.num_transactions, req.fraud_intensity, req.seed)
-    _store[dataset_id] = ds
+@app.post("/dataset/generate", response_model=GenerateDatasetResponse)
+def generate_dataset(req: GenerateDatasetRequest = None):
+    if req is None:
+        req = GenerateDatasetRequest()
+        
+    # Generate dataset
+    state = generate_synthetic_dataset(
+        num_accounts=req.num_accounts,
+        num_transactions=req.num_transactions,
+        fraud_intensity=req.fraud_intensity,
+        seed=req.seed
+    )
+    
+    # Store globally
+    DATASETS[state.dataset_id] = state
+    
+    return GenerateDatasetResponse(
+        dataset_id=state.dataset_id,
+        num_accounts=len(state.accounts),
+        num_transactions=len(state.transactions),
+        fraud_rings_injected=len(state.ground_truth_rings),
+        ready=True
+    )
 
-    fraud_rings = len([a for a in ds["alerts"] if a["pattern_type"] == "circular"])
-    return {
-        "dataset_id": dataset_id,
-        "num_accounts": len(ds["accounts"]),
-        "num_transactions": len(ds["transactions"]),
-        "fraud_rings_injected": fraud_rings,
-        "ready": True,
-    }
-
+# New Endpoint: POST /dataset/load_real
+@app.post("/dataset/load_real", response_model=UploadDatasetResponse)
+def load_real_dataset(req: LoadRealDatasetRequest = None):
+    if req is None:
+        req = LoadRealDatasetRequest()
+        
+    import os
+    if not os.path.exists(req.file_path):
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "file_not_found", "message": f"Real dataset file not found at {req.file_path}."}
+        )
+        
+    dataset_id = f"ds_real_{int(time.time()) % 1000:03d}"
+    state = DatasetState(dataset_id)
+    
+    # Streaming parser to sample file and prioritize fraud
+    import json
+    limit = req.limit
+    max_fraud = int(limit * req.fraud_priority_ratio)
+    
+    fraud_txns = []
+    normal_txns = []
+    warnings = []
+    
+    try:
+        with open(req.file_path, "r", encoding="utf-8") as f:
+            # Skip opening bracket
+            char = f.read(1)
+            while char and char != '[':
+                char = f.read(1)
+                
+            buffer = []
+            in_object = False
+            
+            for line in f:
+                stripped = line.strip()
+                if stripped == "{" or stripped == "{,":
+                    in_object = True
+                    buffer = ["{"]
+                elif in_object:
+                    buffer.append(line)
+                    if stripped == "}" or stripped == "}," or stripped == "},":
+                        in_object = False
+                        obj_str = "".join(buffer).rstrip(" \t\r\n,")
+                        try:
+                            txn = json.loads(obj_str)
+                            is_fraud = txn.get("is_fraud", False)
+                            
+                            mapped_txn = {
+                                "txn_id": txn.get("transaction_id", f"txn_{len(fraud_txns) + len(normal_txns) + 1}"),
+                                "from_account": txn.get("sender_account"),
+                                "to_account": txn.get("receiver_account"),
+                                "amount": float(txn.get("amount", 0.0)),
+                                "timestamp": txn.get("timestamp"),
+                                "transaction_type": txn.get("transaction_type", "transfer"),
+                                "location": txn.get("location"),
+                                "device_used": txn.get("device_used"),
+                                "ip_address": txn.get("ip_address"),
+                                "is_fraud": bool(is_fraud)
+                            }
+                            
+                            try:
+                                ts_str = mapped_txn["timestamp"]
+                                if ts_str:
+                                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                    mapped_txn["timestamp"] = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                            except ValueError:
+                                pass
+                                
+                            if not mapped_txn["from_account"] or not mapped_txn["to_account"]:
+                                continue
+                                
+                            if is_fraud:
+                                if len(fraud_txns) < max_fraud:
+                                    fraud_txns.append(mapped_txn)
+                                    state.ground_truth_dirty_accounts.add(mapped_txn["from_account"])
+                                    state.ground_truth_dirty_accounts.add(mapped_txn["to_account"])
+                            else:
+                                if len(normal_txns) < limit:
+                                    normal_txns.append(mapped_txn)
+                        except Exception as e:
+                            warnings.append(f"Skipped invalid transaction JSON: {str(e)}")
+                        buffer = []
+                        
+                if len(fraud_txns) >= max_fraud and len(normal_txns) >= limit - len(fraud_txns):
+                    break
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "ingestion_failed", "message": f"Error reading dataset file: {str(e)}"}
+        )
+        
+    state.transactions = (fraud_txns + normal_txns[:limit - len(fraud_txns)])[:limit]
+    
+    # Populate accounts in DatasetState
+    for txn in state.transactions:
+        from_acc = txn["from_account"]
+        to_acc = txn["to_account"]
+        
+        for acc in [from_acc, to_acc]:
+            if acc not in state.accounts:
+                state.accounts[acc] = {
+                    "account_id": acc,
+                    "name": f"Account {acc}",
+                    "account_type": "shell" if acc in state.ground_truth_dirty_accounts else "individual",
+                    "initial_balance": 500000.0
+                }
+                
+    fraud_rings_injected = sum(1 for t in state.transactions if t.get("is_fraud"))
+    
+    DATASETS[dataset_id] = state
+    
+    return UploadDatasetResponse(
+        dataset_id=dataset_id,
+        num_accounts=len(state.accounts),
+        num_transactions=len(state.transactions),
+        fraud_rings_injected=fraud_rings_injected,
+        ready=True,
+        warnings=warnings[:10]
+    )
 
 # 2. POST /dataset/upload
-@app.post("/dataset/upload")
+@app.post("/dataset/upload", response_model=UploadDatasetResponse)
 async def upload_dataset(file: UploadFile = File(...)):
     content = await file.read()
-    text = content.decode("utf-8", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
-
-    required = {"from_account", "to_account", "amount", "timestamp"}
-    if not required.issubset(set(reader.fieldnames or [])):
+    decoded = content.decode('utf-8')
+    csv_reader = csv.reader(io.StringIO(decoded))
+    
+    # Read headers
+    try:
+        headers = next(csv_reader)
+        # Strip whitespaces and force lowercase for flexible matching
+        headers = [h.strip().lower() for h in headers]
+    except StopIteration:
         raise HTTPException(
             status_code=400,
-            detail={"error": "bad_request", "message": f"CSV must have columns: {', '.join(required)}"},
+            detail={"error": "bad_request", "message": "Uploaded CSV file is empty."}
         )
-
-    accounts: dict[str, dict] = {}
-    transactions: list[dict] = []
-    warnings: list[str] = []
-    skipped = 0
-    txn_counter = 0
-
-    for row in reader:
-        try:
-            frm = row["from_account"].strip()
-            to = row["to_account"].strip()
-            amount = float(row["amount"])
-            ts = datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00"))
-        except Exception:
-            skipped += 1
+        
+    required_cols = ["from_account", "to_account", "amount", "timestamp"]
+    for col in required_cols:
+        if col not in headers:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "bad_request", "message": f"Missing required column: {col} in CSV headers."}
+            )
+            
+    # Map column headers to indices
+    idx_from = headers.index("from_account")
+    idx_to = headers.index("to_account")
+    idx_amt = headers.index("amount")
+    idx_ts = headers.index("timestamp")
+    
+    dataset_id = f"ds_{int(time.time()) % 1000:03d}"
+    state = DatasetState(dataset_id)
+    
+    warnings = []
+    row_count = 0
+    txn_id_counter = 1
+    
+    for row_idx, row in enumerate(csv_reader, start=2):
+        if not row:
             continue
-
-        txn_counter += 1
-        txn_id = f"txn_{txn_counter:05d}"
-        transactions.append({
-            "txn_id": txn_id, "from_account": frm, "to_account": to,
-            "amount": round(amount, 2), "timestamp": ts, "suspicious": False,
-        })
-
-        for acc_id, direction, amt in [(frm, "out", amount), (to, "in", amount)]:
-            if acc_id not in accounts:
-                accounts[acc_id] = {
-                    "account_id": acc_id, "name": acc_id, "account_type": "individual",
-                    "risk_score": 0, "risk_level": "low", "flags": [],
-                    "total_in": 0.0, "total_out": 0.0, "txn_count": 0,
-                    "fan_in": 0, "fan_out": 0,
-                    "_counterparties_in": set(), "_counterparties_out": set(),
-                    "_timestamps": [],
+        if len(row) < len(required_cols):
+            warnings.append(f"Row {row_idx} skipped: Insufficient columns.")
+            continue
+            
+        from_acc = row[idx_from].strip()
+        to_acc = row[idx_to].strip()
+        amount_str = row[idx_amt].strip()
+        ts_str = row[idx_ts].strip()
+        
+        # Validation checks
+        if not from_acc or not to_acc:
+            warnings.append(f"Row {row_idx} skipped: Empty account identifier.")
+            continue
+            
+        try:
+            amount = float(amount_str)
+            if amount <= 0:
+                warnings.append(f"Row {row_idx} skipped: Non-positive amount.")
+                continue
+        except ValueError:
+            warnings.append(f"Row {row_idx} skipped: Unparseable amount '{amount_str}'.")
+            continue
+            
+        # Parse timestamp
+        try:
+            # Check format
+            dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            formatted_ts = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            warnings.append(f"Row {row_idx} skipped: Unparseable timestamp '{ts_str}'.")
+            continue
+            
+        # Add accounts to dataset state if not present
+        for acc in [from_acc, to_acc]:
+            if acc not in state.accounts:
+                state.accounts[acc] = {
+                    "account_id": acc,
+                    "name": f"Account {acc}",
+                    "account_type": "individual", # Default type
+                    "initial_balance": 100000.0
                 }
-            a = accounts[acc_id]
-            a["total_" + direction] += amt
-            a["txn_count"] += 1
-            a[f"_counterparties_{direction}"].add(to if direction == "out" else frm)
-            a["_timestamps"].append((_ts_str(ts), direction, amt))
-
-    if skipped:
-        warnings.append(f"{skipped} rows skipped: unparseable data")
-
-    dataset_id = f"ds_{uuid.uuid4().hex[:6]}"
-    _store[dataset_id] = {
-        "accounts": accounts, "transactions": transactions,
-        "alerts": [], "analyzed": False, "fraud_accounts": set(),
-    }
-
-    return {
-        "dataset_id": dataset_id,
-        "num_accounts": len(accounts),
-        "num_transactions": len(transactions),
-        "fraud_rings_injected": 0,
-        "ready": True,
-        "warnings": warnings,
-    }
-
+                
+        state.transactions.append({
+            "txn_id": f"txn_{txn_id_counter:05d}",
+            "from_account": from_acc,
+            "to_account": to_acc,
+            "amount": amount,
+            "timestamp": formatted_ts
+        })
+        txn_id_counter += 1
+        row_count += 1
+        
+    if row_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "bad_request", "message": "No valid transaction rows found in CSV."}
+        )
+        
+    DATASETS[dataset_id] = state
+    
+    return UploadDatasetResponse(
+        dataset_id=dataset_id,
+        num_accounts=len(state.accounts),
+        num_transactions=len(state.transactions),
+        fraud_rings_injected=0,
+        ready=True,
+        warnings=warnings
+    )
 
 # 3. POST /analyze
-@app.post("/analyze")
-def analyze(req: AnalyzeRequest):
-    ds = _get_ds(req.dataset_id)
-    import time
-    t0 = time.time()
-    _analyze_dataset(ds)
-    duration_ms = int((time.time() - t0) * 1000)
-
-    patterns_found = {p: 0 for p in PATTERN_TYPES}
-    for alert in ds["alerts"]:
-        patterns_found[alert["pattern_type"]] = patterns_found.get(alert["pattern_type"], 0) + 1
-
-    return {
-        "dataset_id": req.dataset_id,
-        "accounts_scored": len(ds["accounts"]),
-        "alerts_generated": len(ds["alerts"]),
-        "patterns_found": patterns_found,
-        "duration_ms": duration_ms,
-        "ready": True,
+@app.post("/analyze", response_model=AnalyzeResponse)
+def analyze_dataset(req: AnalyzeRequest):
+    state = get_dataset(req.dataset_id)
+    
+    start_time = time.time()
+    
+    # 1. Feature Engineering
+    features_df = compute_features(state.accounts, state.transactions)
+    
+    # 2. Anomaly Scoring
+    anomaly_scores = compute_anomaly_scores(features_df)
+    
+    # 3. Pattern Detection (Graph alerts)
+    alerts = detect_patterns(state.accounts, state.transactions, features_df)
+    
+    # 4. Score Fusion & Explanations
+    risk_results = fuse_risk_scores(features_df, anomaly_scores, alerts)
+    
+    # Save back to state
+    state.accounts_scored = risk_results
+    state.alerts = {alert["alert_id"]: alert for alert in alerts}
+    state.analyzed = True
+    
+    # Pre-cache stats
+    total_amount = sum(float(t["amount"]) for t in state.transactions)
+    high_risk_accounts = sum(1 for acc in risk_results.values() if acc["risk_score"] >= 70)
+    
+    # Amount flagged: sum of involved alert volumes (deduplicating transaction overlaps if needed,
+    # but simplest is sum of alert amount_involved)
+    amount_flagged = sum(a["amount_involved"] for a in alerts)
+    
+    # Counters for patterns_found (fill all 6 keys)
+    patterns_found = {
+        "circular": 0, "layering": 0, "smurfing": 0,
+        "rapid_movement": 0, "fan_in": 0, "fan_out": 0
     }
-
+    for alert in alerts:
+        ptype = alert["pattern_type"]
+        if ptype in patterns_found:
+            patterns_found[ptype] += 1
+            
+    state.stats = {
+        "dataset_id": state.dataset_id,
+        "total_accounts": len(state.accounts),
+        "total_transactions": len(state.transactions),
+        "total_amount": round(total_amount, 2),
+        "high_risk_accounts": high_risk_accounts,
+        "amount_flagged": round(amount_flagged, 2),
+        "alerts_by_type": patterns_found
+    }
+    
+    # Calculate precision/recall against ground truth for developers console
+    if state.ground_truth_dirty_accounts:
+        tp = 0
+        fp = 0
+        fn = 0
+        for acc_id, acc_info in state.accounts_scored.items():
+            is_dirty = acc_id in state.ground_truth_dirty_accounts
+            is_flagged = acc_info["risk_score"] >= 70
+            
+            if is_flagged and is_dirty:
+                tp += 1
+            elif is_flagged and not is_dirty:
+                fp += 1
+            elif not is_flagged and is_dirty:
+                fn += 1
+                
+        precision = (tp / (tp + fp)) * 100 if (tp + fp) > 0 else 0.0
+        recall = (tp / (tp + fn)) * 100 if (tp + fn) > 0 else 0.0
+        
+        print("\n" + "="*50)
+        print(f"ANALYTICS ENGINE REPORT (Dataset: {state.dataset_id})")
+        print("-"*50)
+        print(f"Ground Truth Dirty Accounts Injected: {len(state.ground_truth_dirty_accounts)}")
+        print(f"True Positives (Flagged & Dirty)  : {tp}")
+        print(f"False Positives (Flagged & Clean) : {fp}")
+        print(f"False Negatives (Missed & Dirty)  : {fn}")
+        print(f"Precision                         : {precision:.2f}%")
+        print(f"Recall (Fraud Ring Recovery Rate) : {recall:.2f}%")
+        print("="*50 + "\n")
+        
+    duration_ms = int((time.time() - start_time) * 1000)
+    
+    return AnalyzeResponse(
+        dataset_id=state.dataset_id,
+        accounts_scored=len(state.accounts_scored),
+        alerts_generated=len(state.alerts),
+        patterns_found=patterns_found,
+        duration_ms=duration_ms,
+        ready=True
+    )
 
 # 4. GET /stats
-@app.get("/stats")
-def get_stats(dataset_id: str = "ds_001"):
-    ds = _get_ds(dataset_id)
-    _require_analyzed(ds)
-    accounts = ds["accounts"]
-
-    total_amount = sum(a["total_in"] for a in accounts.values()) / 2  # avoid double-count
-    high_risk = [a for a in accounts.values() if a["risk_level"] in ("high", "critical")]
-    amount_flagged = sum(a["total_out"] for a in high_risk)
-
-    alerts_by_type = {p: 0 for p in PATTERN_TYPES}
-    for alert in ds["alerts"]:
-        alerts_by_type[alert["pattern_type"]] += 1
-
-    top_risk = sorted(accounts.values(), key=lambda a: -a["risk_score"])[:5]
-
-    return {
-        "dataset_id": dataset_id,
-        "total_accounts": len(accounts),
-        "total_transactions": len(ds["transactions"]),
-        "total_amount": round(total_amount, 2),
-        "high_risk_accounts": len(high_risk),
-        "amount_flagged": round(amount_flagged, 2),
-        "alerts_by_type": alerts_by_type,
-        "top_risk_accounts": [
-            {
-                "account_id": a["account_id"],
-                "name": a["name"],
-                "risk_score": a["risk_score"],
-                "risk_level": a["risk_level"],
-            }
-            for a in top_risk
-        ],
-    }
-
+@app.get("/stats", response_model=StatsResponse)
+def get_stats(dataset_id: str):
+    state = get_dataset(dataset_id)
+    if not state.analyzed:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "not_analyzed_yet", "message": "Dataset has not been analyzed yet. Call /analyze first."}
+        )
+        
+    # Compile Top Risk Accounts (max 5)
+    top_accounts_list = []
+    for acc_id, info in state.accounts_scored.items():
+        top_accounts_list.append(TopRiskAccount(
+            account_id=acc_id,
+            name=state.accounts[acc_id]["name"],
+            risk_score=info["risk_score"],
+            risk_level=info["risk_level"]
+        ))
+    # Sort by risk score desc
+    top_accounts_list.sort(key=lambda x: x.risk_score, reverse=True)
+    top_5 = top_accounts_list[:5]
+    
+    return StatsResponse(
+        dataset_id=state.dataset_id,
+        total_accounts=state.stats["total_accounts"],
+        total_transactions=state.stats["total_transactions"],
+        total_amount=state.stats["total_amount"],
+        high_risk_accounts=state.stats["high_risk_accounts"],
+        amount_flagged=state.stats["amount_flagged"],
+        alerts_by_type=state.stats["alerts_by_type"],
+        top_risk_accounts=top_5
+    )
 
 # 5. GET /accounts
-@app.get("/accounts")
-def list_accounts(
-    dataset_id: str = "ds_001",
+@app.get("/accounts", response_model=AccountsListResponse)
+def get_accounts(
+    dataset_id: str,
     sort: str = "risk_desc",
     min_risk: int = 0,
     limit: int = 50,
-    offset: int = 0,
+    offset: int = 0
 ):
-    ds = _get_ds(dataset_id)
-    _require_analyzed(ds)
-    accts = list(ds["accounts"].values())
-
-    filtered = [a for a in accts if a["risk_score"] >= min_risk]
-
-    if sort == "risk_desc":
-        filtered.sort(key=lambda a: -a["risk_score"])
-    elif sort == "risk_asc":
-        filtered.sort(key=lambda a: a["risk_score"])
-    elif sort == "amount_desc":
-        filtered.sort(key=lambda a: -(a["total_in"] + a["total_out"]))
-
-    paginated = filtered[offset: offset + limit]
-    return {
-        "total": len(filtered),
-        "accounts": [
-            {
-                "account_id": a["account_id"],
-                "name": a["name"],
-                "account_type": a["account_type"],
-                "risk_score": a["risk_score"],
-                "risk_level": a["risk_level"],
-                "flags": a["flags"],
-                "total_in": round(a["total_in"], 2),
-                "total_out": round(a["total_out"], 2),
-                "txn_count": a["txn_count"],
-            }
-            for a in paginated
-        ],
-    }
-
-
-# 6. GET /accounts/{account_id}
-@app.get("/accounts/{account_id}")
-def get_account(account_id: str, dataset_id: str = "ds_001"):
-    ds = _get_ds(dataset_id)
-    _require_analyzed(ds)
-    if account_id not in ds["accounts"]:
+    state = get_dataset(dataset_id)
+    if not state.analyzed:
         raise HTTPException(
-            status_code=404,
-            detail={"error": "account_not_found", "message": f"No account with id {account_id}."},
+            status_code=400,
+            detail={"error": "not_analyzed_yet", "message": "Dataset has not been analyzed yet. Call /analyze first."}
         )
-    a = ds["accounts"][account_id]
-    return {
-        "account_id": a["account_id"],
-        "name": a["name"],
-        "account_type": a["account_type"],
-        "risk_score": a["risk_score"],
-        "risk_level": a["risk_level"],
-        "flags": a["flags"],
-        "total_in": round(a["total_in"], 2),
-        "total_out": round(a["total_out"], 2),
-        "txn_count": a["txn_count"],
-        "fan_in": a["fan_in"],
-        "fan_out": a["fan_out"],
-        "explanation": a.get("_explanation", []),
-        "top_counterparties": a.get("_top_counterparties", []),
-        "timeline": a.get("_timeline", []),
-    }
-
-
-# 7. GET /graph
-@app.get("/graph")
-def get_graph(
-    dataset_id: str = "ds_001",
-    account_id: Optional[str] = None,
-    alert_id: Optional[str] = None,
-    depth: int = 2,
-):
-    ds = _get_ds(dataset_id)
-    _require_analyzed(ds)
-
-    if alert_id:
-        alert = next((a for a in ds["alerts"] if a["alert_id"] == alert_id), None)
-        if not alert:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "account_not_found", "message": f"No alert with id {alert_id}."},
-            )
-        members = alert["account_ids"]
-        return _build_subgraph(ds, members, members[0])
-
-    if account_id:
-        if account_id not in ds["accounts"]:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "account_not_found", "message": f"No account with id {account_id}."},
-            )
-        neighbors = _get_neighbors(ds, account_id, min(depth, 3))
-        return _build_subgraph(ds, neighbors, account_id)
-
-    raise HTTPException(
-        status_code=400,
-        detail={"error": "bad_request", "message": "Provide account_id or alert_id."},
+        
+    # Build full list first
+    full_list = []
+    
+    # Calculate account specific transactions totals
+    # (Since we already did this in features.py, let's cache and extract it, or quick aggregate here)
+    totals_in = {}
+    totals_out = {}
+    counts = {}
+    for t in state.transactions:
+        u, v, amt = t["from_account"], t["to_account"], float(t["amount"])
+        totals_out[u] = totals_out.get(u, 0.0) + amt
+        totals_in[v] = totals_in.get(v, 0.0) + amt
+        counts[u] = counts.get(u, 0) + 1
+        counts[v] = counts.get(v, 0) + 1
+        
+    for acc_id, risk_info in state.accounts_scored.items():
+        if risk_info["risk_score"] < min_risk:
+            continue
+            
+        full_list.append(AccountSummary(
+            account_id=acc_id,
+            name=state.accounts[acc_id]["name"],
+            account_type=state.accounts[acc_id]["account_type"],
+            risk_score=risk_info["risk_score"],
+            risk_level=risk_info["risk_level"],
+            flags=risk_info["flags"],
+            total_in=round(totals_in.get(acc_id, 0.0), 2),
+            total_out=round(totals_out.get(acc_id, 0.0), 2),
+            txn_count=counts.get(acc_id, 0)
+        ))
+        
+    # Sort
+    if sort == "risk_desc":
+        full_list.sort(key=lambda x: x.risk_score, reverse=True)
+    elif sort == "risk_asc":
+        full_list.sort(key=lambda x: x.risk_score)
+    elif sort == "amount_desc":
+        full_list.sort(key=lambda x: x.total_in + x.total_out, reverse=True)
+        
+    total_count = len(full_list)
+    paginated = full_list[offset : offset + limit]
+    
+    return AccountsListResponse(
+        total=total_count,
+        accounts=paginated
     )
 
-
-# 8. GET /alerts
-@app.get("/alerts")
-def list_alerts(
-    dataset_id: str = "ds_001",
-    min_severity: int = 0,
-    pattern_type: Optional[str] = None,
-):
-    ds = _get_ds(dataset_id)
-    _require_analyzed(ds)
-    filtered = [a for a in ds["alerts"] if a["severity"] >= min_severity]
-    if pattern_type:
-        filtered = [a for a in filtered if a["pattern_type"] == pattern_type]
-    return {
-        "total": len(filtered),
-        "alerts": [
-            {
-                "alert_id": a["alert_id"],
-                "pattern_type": a["pattern_type"],
-                "title": a["title"],
-                "severity": a["severity"],
-                "risk_level": a["risk_level"],
-                "account_ids": a["account_ids"],
-                "amount_involved": a["amount_involved"],
-                "summary": a["summary"],
-                "detected_at": a["detected_at"],
-            }
-            for a in filtered
-        ],
-    }
-
-
-# 9. GET /alerts/{alert_id}
-@app.get("/alerts/{alert_id}")
-def get_alert(alert_id: str, dataset_id: str = "ds_001"):
-    ds = _get_ds(dataset_id)
-    _require_analyzed(ds)
-    alert = next((a for a in ds["alerts"] if a["alert_id"] == alert_id), None)
-    if not alert:
+# 6. GET /accounts/{account_id}
+@app.get("/accounts/{account_id}", response_model=AccountDetailResponse)
+def get_account_detail(account_id: str, dataset_id: str):
+    state = get_dataset(dataset_id)
+    if not state.analyzed:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "not_analyzed_yet", "message": "Dataset has not been analyzed yet. Call /analyze first."}
+        )
+    if account_id not in state.accounts:
         raise HTTPException(
             status_code=404,
-            detail={"error": "account_not_found", "message": f"No alert with id {alert_id}."},
+            detail={"error": "account_not_found", "message": f"Account with id {account_id} does not exist."}
         )
-    members = alert["account_ids"]
-    graph = _build_subgraph(ds, members, members[0])
-    accounts = ds["accounts"]
-    return {
-        "alert_id": alert["alert_id"],
-        "pattern_type": alert["pattern_type"],
-        "title": alert["title"],
-        "severity": alert["severity"],
-        "risk_level": alert["risk_level"],
-        "amount_involved": alert["amount_involved"],
-        "summary": alert["summary"],
-        "narrative": alert.get("narrative", alert["summary"]),
-        "accounts": [
-            {
-                "account_id": acc_id,
-                "name": accounts[acc_id]["name"] if acc_id in accounts else acc_id,
-                "risk_score": accounts[acc_id]["risk_score"] if acc_id in accounts else 0,
-                "risk_level": accounts[acc_id]["risk_level"] if acc_id in accounts else "low",
-                "role": "origin" if i == 0 else ("beneficiary" if i == len(members) - 1 else "mule"),
-            }
-            for i, acc_id in enumerate(members)
-            if acc_id in accounts
-        ],
-        "graph": graph,
-    }
+        
+    acc = state.accounts[account_id]
+    risk_info = state.accounts_scored[account_id]
+    
+    # Calculate counts, counterparties, timeline
+    counterparties = {}
+    timeline = []
+    
+    fan_in_set = set()
+    fan_out_set = set()
+    total_in = 0.0
+    total_out = 0.0
+    txn_count = 0
+    
+    for t in state.transactions:
+        u, v, amt = t["from_account"], t["to_account"], float(t["amount"])
+        if u == account_id or v == account_id:
+            txn_count += 1
+            direction = "out" if u == account_id else "in"
+            other_id = v if u == account_id else u
+            
+            # Fan set
+            if direction == "in":
+                fan_in_set.add(other_id)
+                total_in += amt
+            else:
+                fan_out_set.add(other_id)
+                total_out += amt
+                
+            # Counterparty aggregation
+            if other_id not in counterparties:
+                counterparties[other_id] = {"in": 0.0, "out": 0.0}
+            counterparties[other_id][direction] += amt
+            
+            # Timeline list
+            timeline.append(TimelineItem(
+                timestamp=t["timestamp"],
+                amount=amt,
+                direction=direction,
+                counterparty_id=other_id,
+                transaction_type=t.get("transaction_type"),
+                location=t.get("location"),
+                device_used=t.get("device_used"),
+                ip_address=t.get("ip_address")
+            ))
+            
+    # Format counterparties (combine directions or show dominant? shape expects amount + direction)
+    # The API contract has counterparties list:
+    # {"account_id", "name", "amount", "direction"}
+    cp_list = []
+    for other_id, amts in counterparties.items():
+        name = state.accounts.get(other_id, {}).get("name", f"Account {other_id}")
+        if amts["in"] > 0:
+            cp_list.append(CounterpartySummary(
+                account_id=other_id,
+                name=name,
+                amount=round(amts["in"], 2),
+                direction="in"
+            ))
+        if amts["out"] > 0:
+            cp_list.append(CounterpartySummary(
+                account_id=other_id,
+                name=name,
+                amount=round(amts["out"], 2),
+                direction="out"
+            ))
+            
+    # Sort counterparties by amount desc
+    cp_list.sort(key=lambda x: x.amount, reverse=True)
+    
+    # Sort timeline: oldest first (API contract note: timeline is sorted oldest-first)
+    timeline.sort(key=lambda x: x.timestamp)
+    
+    return AccountDetailResponse(
+        account_id=account_id,
+        name=acc["name"],
+        account_type=acc["account_type"],
+        risk_score=risk_info["risk_score"],
+        risk_level=risk_info["risk_level"],
+        flags=risk_info["flags"],
+        total_in=round(total_in, 2),
+        total_out=round(total_out, 2),
+        txn_count=txn_count,
+        fan_in=len(fan_in_set),
+        fan_out=len(fan_out_set),
+        explanation=[ExplanationFactor(**exp) for exp in risk_info["explanation"]],
+        top_counterparties=cp_list[:10], # Cap at 10 counterparties
+        timeline=timeline
+    )
+
+# 7. GET /graph
+@app.get("/graph", response_model=GraphResponse)
+def get_graph(
+    dataset_id: str,
+    account_id: Optional[str] = None,
+    alert_id: Optional[str] = None,
+    depth: int = Query(default=2, ge=1, le=3)
+):
+    state = get_dataset(dataset_id)
+    if not state.analyzed:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "not_analyzed_yet", "message": "Dataset has not been analyzed yet. Call /analyze first."}
+        )
+        
+    selected_node_ids = set()
+    center_id = None
+    
+    # Case 1: Alert Graph
+    if alert_id:
+        if alert_id not in state.alerts:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "alert_not_found", "message": f"Alert with id {alert_id} not found."}
+            )
+        alert = state.alerts[alert_id]
+        selected_node_ids.update(alert["account_ids"])
+        # center is first account in cycle/ring
+        if alert["account_ids"]:
+            center_id = alert["account_ids"][0]
+            
+    # Case 2: Ego Graph (centered on account_id)
+    elif account_id:
+        if account_id not in state.accounts:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "account_not_found", "message": f"Account with id {account_id} not found."}
+            )
+        center_id = account_id
+        selected_node_ids.add(account_id)
+        
+        # Simple BFS traversal up to depth
+        current_layer = {account_id}
+        for _ in range(depth):
+            next_layer = set()
+            for u in current_layer:
+                # Find all neighbors in transactions
+                for t in state.transactions:
+                    fr, to = t["from_account"], t["to_account"]
+                    if fr == u:
+                        next_layer.add(to)
+                    elif to == u:
+                        next_layer.add(fr)
+            # Add to selected nodes
+            selected_node_ids.update(next_layer)
+            current_layer = next_layer
+            
+    # Case 3: Empty query (let's return top risk nodes)
+    else:
+        # Just return the top 20 risk accounts and their connections
+        top_accounts = sorted(
+            state.accounts_scored.items(),
+            key=lambda x: x[1]["risk_score"],
+            reverse=True
+        )[:20]
+        selected_node_ids.update([acc_id for acc_id, _ in top_accounts])
+        
+    # Generate graph nodes
+    nodes = []
+    for node_id in selected_node_ids:
+        if node_id in state.accounts:
+            acc = state.accounts[node_id]
+            risk = state.accounts_scored[node_id]
+            
+            # Aggregate unique locations, devices, IPs for this node
+            node_locs = set()
+            node_devs = set()
+            node_ips = set()
+            for t in state.transactions:
+                if t["from_account"] == node_id or t["to_account"] == node_id:
+                    if t.get("location"): node_locs.add(t["location"])
+                    if t.get("device_used"): node_devs.add(t["device_used"])
+                    if t.get("ip_address"): node_ips.add(t["ip_address"])
+                    
+            nodes.append(GraphNode(
+                id=node_id,
+                label=acc["name"],
+                account_type=acc["account_type"],
+                risk_score=risk["risk_score"],
+                risk_level=risk["risk_level"],
+                is_center=(node_id == center_id),
+                flagged=(risk["risk_score"] >= 70),
+                locations=list(node_locs) if node_locs else None,
+                devices=list(node_devs) if node_devs else None,
+                ip_addresses=list(node_ips) if node_ips else None
+            ))
+            
+    # Generate graph edges (aggregate transactions between selected nodes)
+    edges_map = {}
+    for t in state.transactions:
+        u = t["from_account"]
+        v = t["to_account"]
+        
+        # Only include edges connecting selected nodes
+        if u in selected_node_ids and v in selected_node_ids:
+            key = (u, v)
+            amt = float(t["amount"])
+            if key not in edges_map:
+                edges_map[key] = {
+                    "amount": 0.0,
+                    "txn_count": 0,
+                    "last_ts": t["timestamp"],
+                    "locations": set(),
+                    "devices": set(),
+                    "ip_addresses": set(),
+                    "transaction_types": set()
+                }
+            edges_map[key]["amount"] += amt
+            edges_map[key]["txn_count"] += 1
+            if t["timestamp"] > edges_map[key]["last_ts"]:
+                edges_map[key]["last_ts"] = t["timestamp"]
+                
+            if t.get("location"): edges_map[key]["locations"].add(t["location"])
+            if t.get("device_used"): edges_map[key]["devices"].add(t["device_used"])
+            if t.get("ip_address"): edges_map[key]["ip_addresses"].add(t["ip_address"])
+            if t.get("transaction_type"): edges_map[key]["transaction_types"].add(t["transaction_type"])
+                
+    edges = []
+    for (u, v), data in edges_map.items():
+        # Check if this edge connects accounts in any common alert (suspicious edge)
+        suspicious = False
+        for alert in state.alerts.values():
+            if u in alert["account_ids"] and v in alert["account_ids"]:
+                # Ensure the flow direction matches cycle if circular, or just label it suspicious
+                suspicious = True
+                break
+                
+        edge_id = f"e_{u}_{v}"
+        edges.append(GraphEdge(
+            id=edge_id,
+            source=u,
+            target=v,
+            amount=round(data["amount"], 2),
+            txn_count=data["txn_count"],
+            last_timestamp=data["last_ts"],
+            suspicious=suspicious,
+            locations=list(data["locations"]) if data["locations"] else None,
+            devices=list(data["devices"]) if data["devices"] else None,
+            ip_addresses=list(data["ip_addresses"]) if data["ip_addresses"] else None,
+            transaction_types=list(data["transaction_types"]) if data["transaction_types"] else None
+        ))
+        
+    return GraphResponse(
+        center_id=center_id,
+        nodes=nodes,
+        edges=edges
+    )
+
+# 8. GET /alerts
+@app.get("/alerts", response_model=AlertsListResponse)
+def get_alerts(
+    dataset_id: str,
+    min_severity: int = 0,
+    pattern_type: Optional[str] = None
+):
+    state = get_dataset(dataset_id)
+    if not state.analyzed:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "not_analyzed_yet", "message": "Dataset has not been analyzed yet. Call /analyze first."}
+        )
+        
+    alerts_list = []
+    for alert in state.alerts.values():
+        if alert["severity"] < min_severity:
+            continue
+        if pattern_type and alert["pattern_type"] != pattern_type:
+            continue
+            
+        # Determine risk level from severity
+        sev = alert["severity"]
+        if sev <= 39:
+            lvl = "low"
+        elif sev <= 69:
+            lvl = "medium"
+        elif sev <= 89:
+            lvl = "high"
+        else:
+            lvl = "critical"
+            
+        alerts_list.append(AlertSummary(
+            alert_id=alert["alert_id"],
+            pattern_type=alert["pattern_type"],
+            title=alert["title"],
+            severity=sev,
+            risk_level=lvl,
+            account_ids=alert["account_ids"],
+            amount_involved=alert["amount_involved"],
+            summary=alert["summary"],
+            detected_at=alert["detected_at"]
+        ))
+        
+    # Sort alerts by severity descending
+    alerts_list.sort(key=lambda x: x.severity, reverse=True)
+    
+    return AlertsListResponse(
+        total=len(alerts_list),
+        alerts=alerts_list
+    )
+
+# 9. GET /alerts/{alert_id}
+@app.get("/alerts/{alert_id}", response_model=AlertDetailResponse)
+def get_alert_detail(alert_id: str, dataset_id: str):
+    state = get_dataset(dataset_id)
+    if not state.analyzed:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "not_analyzed_yet", "message": "Dataset has not been analyzed yet. Call /analyze first."}
+        )
+    if alert_id not in state.alerts:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "alert_not_found", "message": f"Alert with id {alert_id} not found."}
+        )
+        
+    alert = state.alerts[alert_id]
+    
+    # Calculate severity risk level
+    sev = alert["severity"]
+    if sev <= 39:
+        lvl = "low"
+    elif sev <= 69:
+        lvl = "medium"
+    elif sev <= 89:
+        lvl = "high"
+    else:
+        lvl = "critical"
+        
+    # Member details
+    accounts_info = []
+    for node_id in alert["account_ids"]:
+        if node_id in state.accounts:
+            name = state.accounts[node_id]["name"]
+            score_info = state.accounts_scored[node_id]
+            role = alert.get("roles", {}).get(node_id, "mule")
+            
+            accounts_info.append(AlertAccountInfo(
+                account_id=node_id,
+                name=name,
+                risk_score=score_info["risk_score"],
+                risk_level=score_info["risk_level"],
+                role=role
+            ))
+            
+    # Self contained graph for the alert ring
+    graph = get_graph(dataset_id=dataset_id, alert_id=alert_id)
+    
+    return AlertDetailResponse(
+        alert_id=alert_id,
+        pattern_type=alert["pattern_type"],
+        title=alert["title"],
+        severity=sev,
+        risk_level=lvl,
+        amount_involved=alert["amount_involved"],
+        summary=alert["summary"],
+        narrative=alert["narrative"],
+        accounts=accounts_info,
+        graph=graph
+    )
