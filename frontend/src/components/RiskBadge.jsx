@@ -17,35 +17,35 @@ export function getRiskProperties(levelOrScore) {
   const configs = {
     low: {
       text: 'LOW',
-      bg: 'bg-emerald-950/20',
-      border: 'border-emerald-500/40',
-      textColor: 'text-emerald-400',
-      bullet: 'bg-emerald-400',
-      hex: '#0F9960'
+      bg: 'bg-[#3FB950]/10',
+      border: 'border-[#3FB950]/40',
+      textColor: 'text-[#3FB950]',
+      bullet: 'bg-[#3FB950]',
+      hex: '#3FB950'
     },
     medium: {
       text: 'MEDIUM',
-      bg: 'bg-amber-950/20',
-      border: 'border-amber-500/40',
-      textColor: 'text-amber-400',
-      bullet: 'bg-amber-400',
-      hex: '#FFAE00'
+      bg: 'bg-[#D29922]/10',
+      border: 'border-[#D29922]/40',
+      textColor: 'text-[#D29922]',
+      bullet: 'bg-[#D29922]',
+      hex: '#D29922'
     },
     high: {
       text: 'HIGH',
-      bg: 'bg-orange-950/20',
-      border: 'border-orange-500/40',
-      textColor: 'text-orange-400',
-      bullet: 'bg-orange-400',
-      hex: '#FF7300'
+      bg: 'bg-[#F0883E]/10',
+      border: 'border-[#F0883E]/40',
+      textColor: 'text-[#F0883E]',
+      bullet: 'bg-[#F0883E]',
+      hex: '#F0883E'
     },
     critical: {
       text: 'CRITICAL',
-      bg: 'bg-red-950/20',
-      border: 'border-red-500/40',
-      textColor: 'text-red-400',
-      bullet: 'bg-red-400 animate-pulse',
-      hex: '#FF3B30'
+      bg: 'bg-[#E24B4A]/10',
+      border: 'border-[#E24B4A]/40',
+      textColor: 'text-[#E24B4A]',
+      bullet: 'bg-[#E24B4A] animate-pulse',
+      hex: '#E24B4A'
     }
   };
 

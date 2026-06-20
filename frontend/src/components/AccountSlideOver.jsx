@@ -4,10 +4,33 @@ import { api } from '../api';
 import RiskBadge from './RiskBadge';
 import RiskGauge from './RiskGauge';
 
+function formatIndianCurrency(amount) {
+  if (amount >= 10000000) {
+    const crVal = amount / 10000000;
+    const formatted = Number(crVal.toFixed(2));
+    return `₹${formatted} Cr`;
+  } else if (amount >= 100000) {
+    const lVal = amount / 100000;
+    const formatted = Number(lVal.toFixed(2));
+    return `₹${formatted}L`;
+  }
+  return `₹${amount.toLocaleString('en-IN')}`;
+}
+
 export default function AccountSlideOver({ accountId, onClose }) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [animate, setAnimate] = useState(false);
+
+  useEffect(() => {
+    if (data) {
+      const t = setTimeout(() => setAnimate(true), 50);
+      return () => clearTimeout(t);
+    } else {
+      setAnimate(false);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -97,11 +120,11 @@ export default function AccountSlideOver({ accountId, onClose }) {
               <div className="grid grid-cols-2 gap-3 text-[10px]">
                 <div className="p-3 border border-aura-border bg-black/10">
                   <span className="text-[8px] text-aura-textMuted block">TOTAL_INFLOW</span>
-                  <span className="font-bold text-emerald-400 block mt-0.5">₹{data.total_in.toLocaleString()}</span>
+                  <span className="font-bold text-emerald-400 block mt-0.5">{formatIndianCurrency(data.total_in)}</span>
                 </div>
                 <div className="p-3 border border-aura-border bg-black/10">
                   <span className="text-[8px] text-aura-textMuted block">TOTAL_OUTFLOW</span>
-                  <span className="font-bold text-orange-400 block mt-0.5">₹{data.total_out.toLocaleString()}</span>
+                  <span className="font-bold text-orange-400 block mt-0.5">{formatIndianCurrency(data.total_out)}</span>
                 </div>
                 <div className="p-3 border border-aura-border bg-black/10">
                   <span className="text-[8px] text-aura-textMuted block">TRANSFERS</span>
@@ -115,21 +138,19 @@ export default function AccountSlideOver({ accountId, onClose }) {
 
               {/* Explainability vector bars */}
               <div className="space-y-3">
-                <h4 className="text-[9px] font-bold uppercase tracking-wider text-aura-textMuted">Threat Attribution Logs</h4>
-                <div className="space-y-3.5 border border-aura-border bg-black/10 p-4 rounded-none">
+                <h4 className="text-[9px] font-bold uppercase tracking-wider text-aura-textMuted">Why flagged?</h4>
+                <div className="border border-aura-border bg-black/10 p-4 rounded-none divide-y divide-aura-border/30">
                   {data.explanation && data.explanation.map((item, idx) => (
-                    <div key={idx} className="space-y-1">
-                      <div className="flex justify-between text-[10px]">
-                        <span className="font-bold text-white">{item.factor}</span>
-                        <span className="text-aura-accent">+{item.contribution}%</span>
-                      </div>
-                      <p className="text-[9px] text-aura-textMuted leading-relaxed">{item.detail}</p>
-                      <div className="h-1 w-full bg-aura-border rounded-none overflow-hidden">
+                    <div key={idx} className="expl-row border-b-0 py-2 first:pt-0 last:pb-0">
+                      <div className="expl-factor text-xs min-w-[90px] w-auto max-w-[110px]">{item.factor}</div>
+                      <div className="expl-detail text-[10px]">{item.detail}</div>
+                      <div className="expl-bar-wrap w-16">
                         <div 
-                          className="h-full bg-aura-accent rounded-none transition-all duration-1000"
-                          style={{ width: `${item.contribution}%` }}
+                          className="expl-bar" 
+                          style={{ width: animate ? `${item.contribution}%` : '0%' }} 
                         />
                       </div>
+                      <div className="expl-num">+{item.contribution}</div>
                     </div>
                   ))}
                 </div>
@@ -147,7 +168,7 @@ export default function AccountSlideOver({ accountId, onClose }) {
                       </div>
                       <div className="text-right">
                         <span className="font-bold block text-white">
-                          ₹{cp.amount.toLocaleString()}
+                          {formatIndianCurrency(cp.amount)}
                         </span>
                         <span className={`text-[8px] font-bold ${cp.direction === 'in' ? 'text-emerald-400' : 'text-orange-400'}`}>
                           {cp.direction === 'in' ? '[INBOUND]' : '[OUTBOUND]'}

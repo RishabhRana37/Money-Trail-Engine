@@ -178,3 +178,122 @@
 .terminal-active {
   animation: terminal-flicker 0.15s infinite;
 }
+
+/* Attribution Factors explanation row */
+.expl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 0.5px solid var(--panel-border);
+}
+.expl-row:last-child {
+  border-bottom: none;
+}
+.expl-factor {
+  font-size: 13px;
+  font-weight: 500;
+  width: 130px;
+  flex-shrink: 0;
+  color: #fff;
+}
+.expl-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex: 1;
+}
+.expl-bar-wrap {
+  width: 80px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 99px;
+  height: 5px;
+  flex-shrink: 0;
+}
+.expl-bar {
+  height: 5px;
+  border-radius: 99px;
+  background: #E24B4A;
+  transition: width 400ms ease-out;
+}
+.expl-num {
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #E24B4A;
+  min-width: 24px;
+  text-align: right;
+}
+
+@keyframes slide-in-bottom-right {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.animate-toast {
+  animation: slide-in-bottom-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Lenis Smooth Scroll Configuration */
+html.lenis, html.lenis body {
+  height: auto;
+}
+.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis-stopped {
+  overflow: hidden;
+}
+.lenis-scrolling iframe {
+  pointer-events: none;
+}
+
+/* Premium Glassmorphism & WebGL Reveals */
+.reveal-wrapper {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.reveal-text {
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+}
+.reveal-word {
+  display: inline-block;
+  transform: translateY(100%);
+}
+.reveal-active .reveal-word {
+  transform: translateY(0);
+}
+
+.glass-panel {
+  background: rgba(11, 14, 20, 0.45);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transition: border-color 0.3s ease, transform 0.3s ease;
+}
+.glass-panel:hover {
+  border-color: rgba(0, 229, 255, 0.2);
+}
+
+.premium-headline {
+  font-family: 'Inter', sans-serif;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+}
+
+.glow-text-cyan {
+  text-shadow: 0 0 40px rgba(0, 229, 255, 0.45);
+}
+
+.glow-text-critical {
+  text-shadow: 0 0 40px rgba(226, 75, 74, 0.45);
+}

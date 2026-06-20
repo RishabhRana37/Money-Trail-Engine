@@ -135,7 +135,7 @@ export default function GraphView() {
         setVisibleEdges(prev => [...prev, allEdges[currentIndex]]);
         currentIndex++;
       }
-    }, 1200);
+    }, 600);
   };
 
   const stopReplay = () => {
@@ -279,16 +279,16 @@ export default function GraphView() {
             backgroundColor="#0B0E14"
             
             // Vector style width
-            linkWidth={d => Math.max(0.8, Math.min(4, Math.log10(d.amount / 1000)))}
-            linkColor={d => d.suspicious ? '#FF3B30' : '#1F2836'}
+            linkWidth={d => Math.max(1, Math.log10(d.amount) * 0.6)}
+            linkColor={d => d.suspicious ? '#E24B4A' : '#444'}
             linkDirectionalArrowLength={5}
             linkDirectionalArrowRelPos={1}
             
             // Suspect flows animate scanning particles
-            linkDirectionalParticles={d => d.suspicious ? 5 : 0}
+            linkDirectionalParticles={d => d.suspicious ? 4 : 0}
             linkDirectionalParticleWidth={2}
-            linkDirectionalParticleSpeed={0.015}
-            linkDirectionalParticleColor={() => '#00E5FF'}
+            linkDirectionalParticleSpeed={0.004}
+            linkDirectionalParticleColor={() => '#E24B4A'}
 
             // Canvas drawing overlay (Target crosshairs, custom fonts/shapes)
             nodeCanvasObject={(node, ctx, globalScale) => {
@@ -296,7 +296,7 @@ export default function GraphView() {
               const isCenter = node.is_center;
               const isShell = node.account_type === 'shell';
               
-              const radius = 5 + (node.risk_score / 20); 
+              const radius = Math.max(3.5, node.risk_score / 10); 
               
               ctx.save();
               
@@ -328,14 +328,9 @@ export default function GraphView() {
                 ctx.stroke();
               }
 
-              // 2. Draw Node Body shape (shell = square, others = circle)
+              // 2. Draw Node Body shape (shell = dashed ring, standard = filled circle)
               ctx.beginPath();
-              if (isShell) {
-                const size = radius * 1.8;
-                ctx.rect(node.x - size / 2, node.y - size / 2, size, size);
-              } else {
-                ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
-              }
+              ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
               ctx.fillStyle = config.hex;
               ctx.fill();
               
@@ -344,10 +339,21 @@ export default function GraphView() {
               ctx.lineWidth = 1.2;
               ctx.stroke();
               
-              // thin neon border
-              ctx.strokeStyle = config.hex;
-              ctx.lineWidth = 0.5;
-              ctx.stroke();
+              if (isShell) {
+                // outer dashed ring
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, radius + 2.5, 0, 2 * Math.PI, false);
+                ctx.setLineDash([3, 2]);
+                ctx.strokeStyle = '#E24B4A';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.setLineDash([]); // Reset
+              } else {
+                // thin border matching risk level
+                ctx.strokeStyle = config.hex;
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+              }
 
               // 3. Draw Labels (only visible when zoomed in)
               if (globalScale > 0.8) {

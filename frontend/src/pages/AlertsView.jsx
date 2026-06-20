@@ -3,6 +3,33 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import RiskBadge from '../components/RiskBadge';
 
+function formatIndianCurrency(amount) {
+  if (amount >= 10000000) {
+    const crVal = amount / 10000000;
+    const formatted = Number(crVal.toFixed(2));
+    return `₹${formatted} Cr`;
+  } else if (amount >= 100000) {
+    const lVal = amount / 100000;
+    const formatted = Number(lVal.toFixed(2));
+    return `₹${formatted}L`;
+  }
+  return `₹${amount.toLocaleString('en-IN')}`;
+}
+
+function SeverityPill({ score }) {
+  let style = "bg-slate-800 text-slate-300 border-slate-700/50";
+  if (score >= 90) style = "bg-[#FCEBEB] text-[#A32D2D] border-[#E24B4A]/20";
+  else if (score >= 70) style = "bg-[#FAEEDA] text-[#854F0B] border-[#F0883E]/20";
+  else if (score >= 40) style = "bg-[#FAEEDA] text-[#634000] border-[#D29922]/20";
+  else style = "bg-[#EAF3DE] text-[#3B6D11] border-[#3FB950]/20";
+  
+  return (
+    <span className={`inline-flex items-center justify-center font-mono text-[10px] font-bold px-2 py-0.5 border rounded-full ${style}`}>
+      {score}
+    </span>
+  );
+}
+
 export default function AlertsView({ datasetId }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -17,13 +44,13 @@ export default function AlertsView({ datasetId }) {
   const [minSeverity, setMinSeverity] = useState(0);
 
   const patternTypes = [
-    { id: '', label: 'ALL_VECTORS' },
-    { id: 'circular', label: 'CIRCULAR_LOOP' },
-    { id: 'layering', label: 'LAYERING' },
-    { id: 'smurfing', label: 'SMURFING' },
-    { id: 'rapid_movement', label: 'RAPID_MOVE' },
-    { id: 'fan_in', label: 'FAN_IN' },
-    { id: 'fan_out', label: 'FAN_OUT' },
+    { id: '', label: 'All' },
+    { id: 'circular', label: 'Circular' },
+    { id: 'layering', label: 'Layering' },
+    { id: 'smurfing', label: 'Smurfing' },
+    { id: 'rapid_movement', label: 'Rapid movement' },
+    { id: 'fan_in', label: 'Fan-in' },
+    { id: 'fan_out', label: 'Fan-out' },
   ];
 
   const fetchAlerts = async () => {
@@ -158,14 +185,17 @@ export default function AlertsView({ datasetId }) {
                   
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-aura-border/40 pb-3 mb-3 mt-1">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <SeverityPill score={alert.severity} />
+                        <span className="inline-flex text-[8px] font-bold border border-aura-indigo/40 bg-aura-indigo/5 text-aura-indigo px-1.5 py-0.2 tracking-wider">
+                          {alert.pattern_type.replace('_', ' ').toUpperCase()}
+                        </span>
                         <span className="font-bold text-white text-sm">{alert.title}</span>
                       </div>
-                      <span className="inline-flex text-[8px] font-bold border border-aura-indigo/40 bg-aura-indigo/5 text-aura-indigo px-1.5 py-0.2 tracking-wider">
-                        {alert.pattern_type.toUpperCase()}
-                      </span>
                     </div>
-                    <RiskBadge score={alert.severity} />
+                    <span className="text-xs font-mono text-aura-textMuted font-bold">
+                      {formatIndianCurrency(alert.amount_involved)} involved
+                    </span>
                   </div>
                   
                   <p className="text-xs text-aura-textLight leading-relaxed">{alert.summary}</p>
@@ -173,7 +203,7 @@ export default function AlertsView({ datasetId }) {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 pt-3 border-t border-aura-border/40 text-[10px] text-aura-textMuted">
                     <div>
                       <span className="block text-[8px]">EXPOSED_VOLUME</span>
-                      <span className="font-bold text-white text-xs">₹{alert.amount_involved.toLocaleString()}</span>
+                      <span className="font-bold text-white text-xs">{formatIndianCurrency(alert.amount_involved)}</span>
                     </div>
                     <div>
                       <span className="block text-[8px]">ONTOLOGY_MEMBERS</span>

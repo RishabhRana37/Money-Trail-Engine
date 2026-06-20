@@ -5,12 +5,35 @@ import { api } from '../api';
 import RiskBadge from '../components/RiskBadge';
 import RiskGauge from '../components/RiskGauge';
 
+function formatIndianCurrency(amount) {
+  if (amount >= 10000000) {
+    const crVal = amount / 10000000;
+    const formatted = Number(crVal.toFixed(2));
+    return `₹${formatted} Cr`;
+  } else if (amount >= 100000) {
+    const lVal = amount / 100000;
+    const formatted = Number(lVal.toFixed(2));
+    return `₹${formatted}L`;
+  }
+  return `₹${amount.toLocaleString('en-IN')}`;
+}
+
 export default function AccountDetail() {
   const { accountId } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [animate, setAnimate] = useState(false);
+
+  useEffect(() => {
+    if (data) {
+      const t = setTimeout(() => setAnimate(true), 50);
+      return () => clearTimeout(t);
+    } else {
+      setAnimate(false);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -82,7 +105,7 @@ export default function AccountDetail() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
             </svg>
-            TRACE_MONEY_trail
+            View in graph
           </button>
         </div>
       </div>
@@ -124,11 +147,11 @@ export default function AccountDetail() {
             <div className="grid grid-cols-2 gap-3 text-[10px]">
               <div className="p-3 bg-black/10 border border-aura-border/40">
                 <span className="text-[8px] text-aura-textMuted block">DEPOSITED</span>
-                <span className="text-xs font-bold text-emerald-400 mt-0.5 block">₹{data.total_in.toLocaleString()}</span>
+                <span className="text-xs font-bold text-emerald-400 mt-0.5 block">{formatIndianCurrency(data.total_in)}</span>
               </div>
               <div className="p-3 bg-black/10 border border-aura-border/40">
                 <span className="text-[8px] text-aura-textMuted block">TRANSFERRED</span>
-                <span className="text-xs font-bold text-orange-400 mt-0.5 block">₹{data.total_out.toLocaleString()}</span>
+                <span className="text-xs font-bold text-orange-400 mt-0.5 block">{formatIndianCurrency(data.total_out)}</span>
               </div>
               <div className="p-3 bg-black/10 border border-aura-border/40">
                 <span className="text-[8px] text-aura-textMuted block">FAN-IN (DEPS)</span>
@@ -150,22 +173,20 @@ export default function AccountDetail() {
         <div className="lg:col-span-2 space-y-6">
           {/* Explanation panel */}
           <div className="p-6 hud-panel space-y-4 shadow-xl">
-            <span className="hud-corner-tl">[THREAT_ATTRIBUTION]</span>
-            <h3 className="text-[9px] font-bold uppercase tracking-wider text-aura-textMuted mt-1">Attribution Factors</h3>
-            <div className="space-y-4">
+            <span className="hud-corner-tl">[WHY_FLAGGED]</span>
+            <h3 className="text-[9px] font-bold uppercase tracking-wider text-aura-textMuted mt-1">Why flagged?</h3>
+            <div className="divide-y divide-aura-border/30">
               {data.explanation.map((item, idx) => (
-                <div key={idx} className="space-y-1.5 border-b border-aura-border/40 pb-3 last:border-b-0 last:pb-0">
-                  <div className="flex justify-between text-[11px]">
-                    <span className="font-bold text-white">{item.factor}</span>
-                    <span className="text-aura-accent font-bold">+{item.contribution}%</span>
-                  </div>
-                  <p className="text-[10px] text-aura-textMuted leading-relaxed">{item.detail}</p>
-                  <div className="h-1.5 w-full bg-aura-border rounded-none overflow-hidden">
+                <div key={idx} className="expl-row">
+                  <div className="expl-factor">{item.factor}</div>
+                  <div className="expl-detail">{item.detail}</div>
+                  <div className="expl-bar-wrap">
                     <div 
-                      className="h-full bg-aura-accent rounded-none transition-all duration-1000"
-                      style={{ width: `${item.contribution}%` }}
+                      className="expl-bar" 
+                      style={{ width: animate ? `${item.contribution}%` : '0%' }} 
                     />
                   </div>
+                  <div className="expl-num">+{item.contribution}</div>
                 </div>
               ))}
             </div>
@@ -180,12 +201,12 @@ export default function AccountDetail() {
                 <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0F9960" stopOpacity={0.15}/>
-                      <stop offset="95%" stopColor="#0F9960" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#3FB950" stopOpacity={0.15}/>
+                      <stop offset="95%" stopColor="#3FB950" stopOpacity={0}/>
                     </linearGradient>
                     <linearGradient id="colorOutflow" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#FF3B30" stopOpacity={0.15}/>
-                      <stop offset="95%" stopColor="#FF3B30" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#E24B4A" stopOpacity={0.15}/>
+                      <stop offset="95%" stopColor="#E24B4A" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="2 4" stroke="#1F2836" />
@@ -196,8 +217,8 @@ export default function AccountDetail() {
                     labelStyle={{ fontWeight: 'bold' }}
                     itemStyle={{ fontSize: 10 }}
                   />
-                  <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#0F9960" strokeWidth={1.5} fillOpacity={1} fill="url(#colorInflow)" />
-                  <Area type="monotone" dataKey="outflow" name="Outflow" stroke="#FF3B30" strokeWidth={1.5} fillOpacity={1} fill="url(#colorOutflow)" />
+                  <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#3FB950" strokeWidth={1.5} fillOpacity={1} fill="url(#colorInflow)" />
+                  <Area type="monotone" dataKey="outflow" name="Outflow" stroke="#E24B4A" strokeWidth={1.5} fillOpacity={1} fill="url(#colorOutflow)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -220,7 +241,7 @@ export default function AccountDetail() {
                     </span>
                   </div>
                   <div className="text-right space-y-1">
-                    <span className="text-xs font-bold text-white block">₹{cp.amount.toLocaleString()}</span>
+                    <span className="text-xs font-bold text-white block">{formatIndianCurrency(cp.amount)}</span>
                     <span className={`text-[8px] font-bold px-1.5 py-0.2 border ${
                       cp.direction === 'in' ? 'bg-emerald-950/20 border-emerald-500/20 text-emerald-400' : 'bg-orange-950/20 border-orange-500/20 text-orange-400'
                     }`}>
