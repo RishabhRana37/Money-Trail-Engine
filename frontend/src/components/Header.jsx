@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
 
 export default function Header({ currentDataset, onResetDataset, isGenerating }) {
   const [sysTime, setSysTime] = useState('');
@@ -42,9 +42,20 @@ export default function Header({ currentDataset, onResetDataset, isGenerating })
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
-          {/* Logo & coordinates */}
+          {/* Logo & coordinates & Home Button */}
           <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-none bg-aura-accent flex items-center justify-center font-mono font-bold text-black text-sm shadow-[0_0_10px_rgba(0,229,255,0.3)]">
+            <Link
+              to="/landing"
+              className="w-7 h-7 border border-aura-accent/40 text-aura-accent hover:bg-aura-accent/15 hover:text-white hover:shadow-[0_0_10px_rgba(0,240,255,0.35)] active:scale-95 duration-200 transition-all flex items-center justify-center rounded-none"
+              title="Return to Landing"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+              </svg>
+            </Link>
+
+            <div className="w-7 h-7 rounded-none bg-aura-accent flex items-center justify-center font-mono font-bold text-black text-sm shadow-[0_0_10px_rgba(0,240,255,0.3)]">
               A
             </div>
             <div>
