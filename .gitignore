@@ -1,0 +1,46 @@
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+bin/
+lib/
+include/
+share/
+
+# Python caching & byte-code
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Node / Vite dependencies and builds
+node_modules/
+dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vite/
+.eslintcache
+
+# Vercel deployment folder
+.vercel/
+
+# OS / Editor files
+.DS_Store
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.user
+*.sw?
+Thumbs.db
+
+# Project-specific large data files & local models
+data/
+models/
+scratch/transactions.json
+metrics.json
