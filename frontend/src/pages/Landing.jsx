@@ -359,6 +359,18 @@ function TacticalGlobe({ scrollProgress, selectedTarget, onTargetSelected }) {
         }
       });
 
+      // Draw telemetry coordinate legend on the top-right of the canvas (only if HUD is visible)
+      const hudOpacity = Math.max(0, 1 - scrollProgress * 5);
+      if (hudOpacity > 0.01) {
+        ctx.fillStyle = `rgba(107, 123, 145, ${hudOpacity * 0.75})`;
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(`AZIMUTH: ${(anglesRef.current.ry * 57.3).toFixed(1)}°`, width - 24, 76);
+        ctx.fillText(`ELEVATION: ${(anglesRef.current.rx * 57.3).toFixed(1)}°`, width - 24, 90);
+        ctx.fillText(`BATTLESPACE: ACTIVE DETECTED`, width - 24, 104);
+        ctx.textAlign = 'left'; // restore default
+      }
+
       animId = requestAnimationFrame(draw);
     };
 
@@ -580,13 +592,6 @@ export default function Landing() {
               })}
             </div>
           </aside>
-
-          {/* Center Coordinates Legend HUD marker */}
-          <div className="absolute right-6 top-6 flex flex-col font-mono text-[9px] text-slate-500 text-right pointer-events-none">
-            <span>AZIMUTH: {(anglesRef.current.ry * 57.3).toFixed(1)}°</span>
-            <span>ELEVATION: {(anglesRef.current.rx * 57.3).toFixed(1)}°</span>
-            <span>BATTLESPACE: ACTIVE DETECTED</span>
-          </div>
         </div>
 
         {/* FOOTER: Giant "AURA" Title Overlay & Telemetry Columns */}
