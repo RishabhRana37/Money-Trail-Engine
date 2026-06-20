@@ -111,9 +111,11 @@ def run_test():
     print("REAL DATASET INTEGRATION TEST")
     print("=" * 60)
 
-    file_path = "D:/transactions.json"
+    file_path = "scratch/transactions.json"
     if not os.path.exists(file_path):
-        print(f"ERROR: Dataset file not found at {file_path}")
+        file_path = "D:/transactions.json"
+    if not os.path.exists(file_path):
+        print(f"ERROR: Dataset file not found at scratch/transactions.json or D:/transactions.json")
         sys.exit(1)
 
     # Step 1: Load

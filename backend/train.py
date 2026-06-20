@@ -26,8 +26,14 @@ def compute_fast_features(accounts_set, transactions):
             "in_txns": [],
             "out_txns": [],
             "structuring_count": 0,
-            "round_amount_count": 0
+            "round_amount_count": 0,
+            "locations": set(),
+            "devices": set(),
+            "ips": set()
         }
+        
+    # Map IP to accounts
+    ip_to_accounts = {}
         
     # Process transactions
     for txn in transactions:
@@ -45,6 +51,14 @@ def compute_fast_features(accounts_set, transactions):
         is_structured = 45000.0 <= amount < 50000.0
         is_round = (amount % 5000 == 0) or (amount % 10000 == 0)
         
+        # Track IP sharing
+        ip = txn.get("ip_address")
+        if ip:
+            if ip not in ip_to_accounts:
+                ip_to_accounts[ip] = set()
+            ip_to_accounts[ip].add(from_acc)
+            ip_to_accounts[ip].add(to_acc)
+        
         if from_acc in feature_dict:
             f = feature_dict[from_acc]
             f["total_out"] += amount
@@ -55,6 +69,12 @@ def compute_fast_features(accounts_set, transactions):
                 f["structuring_count"] += 1
             if is_round:
                 f["round_amount_count"] += 1
+            if txn.get("location"):
+                f["locations"].add(txn["location"])
+            if txn.get("device_used"):
+                f["devices"].add(txn["device_used"])
+            if txn.get("ip_address"):
+                f["ips"].add(txn["ip_address"])
                 
         if to_acc in feature_dict:
             f = feature_dict[to_acc]
@@ -66,6 +86,12 @@ def compute_fast_features(accounts_set, transactions):
                 f["structuring_count"] += 1
             if is_round:
                 f["round_amount_count"] += 1
+            if txn.get("location"):
+                f["locations"].add(txn["location"])
+            if txn.get("device_used"):
+                f["devices"].add(txn["device_used"])
+            if txn.get("ip_address"):
+                f["ips"].add(txn["ip_address"])
 
     # NetworkX Graph construction for centrality
     G = nx.DiGraph()
@@ -123,6 +149,11 @@ def compute_fast_features(accounts_set, transactions):
         structuring_score = f["structuring_count"] / txn_count if txn_count > 0 else 0.0
         round_amount_ratio = f["round_amount_count"] / txn_count if txn_count > 0 else 0.0
         
+        # IP sharing count
+        ip_sharing_count = 0
+        for ip in f["ips"]:
+            ip_sharing_count += len(ip_to_accounts.get(ip, set())) - 1
+            
         rows.append({
             "account_id": acc_id,
             "total_in": total_in,
@@ -137,7 +168,11 @@ def compute_fast_features(accounts_set, transactions):
             "round_amount_ratio": round_amount_ratio,
             "betweenness_centrality": betweenness.get(acc_id, 0.0),
             "in_degree": in_degree.get(acc_id, 0),
-            "out_degree": out_degree.get(acc_id, 0)
+            "out_degree": out_degree.get(acc_id, 0),
+            "unique_locations_count": len(f["locations"]) if f["locations"] else 1,
+            "unique_devices_count": len(f["devices"]) if f["devices"] else 1,
+            "unique_ips_count": len(f["ips"]) if f["ips"] else 1,
+            "ip_sharing_count": ip_sharing_count
         })
         
     return pd.DataFrame(rows)
@@ -181,6 +216,9 @@ def main():
                 "to_account": to_acc,
                 "amount": float(t["amount"]),
                 "timestamp": t["timestamp"],
+                "location": t.get("location"),
+                "device_used": t.get("device_used"),
+                "ip_address": t.get("ip_address"),
                 "is_fraud": t.get("is_fraud", False)
             })
             
@@ -205,7 +243,8 @@ def main():
         "total_in", "total_out", "txn_count", "fan_in", "fan_out",
         "pass_through_ratio", "mean_time_to_forward", "mule_ratio",
         "structuring_score", "round_amount_ratio", "betweenness_centrality",
-        "in_degree", "out_degree"
+        "in_degree", "out_degree",
+        "unique_locations_count", "unique_devices_count", "unique_ips_count", "ip_sharing_count"
     ]
     
     X = features_df[feature_cols].fillna(0)
