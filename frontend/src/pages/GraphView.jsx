@@ -278,7 +278,14 @@ export default function GraphView() {
         {graphData.nodes.length > 0 ? (
           <ForceGraph2D
             ref={fgRef}
-            graphData={{ nodes: graphData.nodes, links: visibleEdges }}
+            graphData={{ 
+              nodes: graphData.nodes, 
+              links: visibleEdges.map(edge => ({
+                ...edge,
+                source: typeof edge.source === 'object' ? edge.source.id : edge.source,
+                target: typeof edge.target === 'object' ? edge.target.id : edge.target
+              }))
+            }}
             backgroundColor="#0B0E14"
             
             // Link formatting
