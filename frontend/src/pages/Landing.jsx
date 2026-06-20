@@ -1,15 +1,68 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-/* ── Animated dot-matrix canvas background ─────────────────────────────── */
-function TacticalCanvas() {
+/* ── MOCK DATA FOR TACTICAL TARGETS ─────────────────────────────────────── */
+const TARGETS_DATA = [
+  { id: 'TGT-A01', name: 'OP RADIANT FALCON', type: 'Vessel', lat: 0.26, lon: 1.00, status: 'FIX', risk: 'P1', hash: 'MTS/HCS/SI/TK/OC/NF' },
+  { id: 'acc_0042', name: 'Quikfix Traders', type: 'Shell Comp.', lat: 0.50, lon: 1.35, status: 'ENGAGE', risk: 'P1', hash: 'MTS/HCS/SI/TK/OC/NF' },
+  { id: 'acc_0118', name: 'Neel Sharma', type: 'Mule Node', lat: 0.48, lon: 1.36, status: 'TRACK', risk: 'P2', hash: 'MTS/HCS/SI/TK/OC/NF' },
+  { id: 'TGT-I05', name: '#0a196b / SA-5', type: 'IADS', lat: 0.55, lon: 0.80, status: 'ENGAGE', risk: 'P1', hash: 'MTS/HCS/SI/TK/OC/NF' },
+  { id: 'TGT-V12', name: 'CONTAINER VESSEL ALPHA', type: 'Vessel', lat: -0.10, lon: 1.20, status: 'TRACK', risk: 'P2', hash: 'MTS/HCS/SI/TK/OC/NF' },
+  { id: 'acc_0091', name: 'Maya Holdings', type: 'Business Mule', lat: 0.70, lon: -1.30, status: 'TRACK', risk: 'P2', hash: 'MTS/HCS/SI/TK/OC/NF' },
+];
+
+/* ── 3D CANVAS GLOBE COMPONENT ─────────────────────────────────────────── */
+function TacticalGlobe({ scrollProgress, selectedTarget, onTargetSelected }) {
   const canvasRef = useRef(null);
+  const anglesRef = useRef({ rx: 0.3, ry: 0 });
+  const timeRef = useRef(0);
+
+  // Generate sphere points once (continents vs ocean)
+  const spherePointsRef = useRef([]);
+  useEffect(() => {
+    const points = [];
+    const continents = [
+      { lat: 0.3, lon: 0.5, radius: 0.9 },   // Asia/Europe
+      { lat: -0.1, lon: 0.3, radius: 0.7 },  // Africa
+      { lat: 0.6, lon: -1.4, radius: 0.8 },  // North America
+      { lat: -0.2, lon: -1.0, radius: 0.7 }, // South America
+      { lat: -0.4, lon: 2.3, radius: 0.5 }   // Australia/Oceania
+    ];
+
+    for (let latIdx = -22; latIdx <= 22; latIdx++) {
+      const lat = (latIdx / 24) * Math.PI * 0.48;
+      const rCosLat = Math.cos(lat);
+      for (let lonIdx = 0; lonIdx < 70; lonIdx++) {
+        const lon = (lonIdx / 70) * Math.PI * 2 - Math.PI;
+
+        // Check if this point lies inside any continent boundary
+        let isLand = false;
+        for (const cont of continents) {
+          const dLat = lat - cont.lat;
+          const dLon = lon - cont.lon;
+          // Haversine-like distance proxy
+          const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+          if (dist < cont.radius) {
+            isLand = true;
+            break;
+          }
+        }
+
+        // Denser dots on land, sparse on water for tactical styling
+        if (isLand || Math.random() < 0.12) {
+          points.push({ lat, lon, isLand });
+        }
+      }
+    }
+    spherePointsRef.current = points;
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let animId;
-    let t = 0;
+
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
@@ -20,396 +73,730 @@ function TacticalCanvas() {
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Dot grid
-      ctx.fillStyle = 'rgba(0, 229, 255, 0.06)';
-      const spacing = 30;
-      for (let x = 0; x < canvas.width; x += spacing) {
-        for (let y = 0; y < canvas.height; y += spacing) {
-          const pulse = Math.sin(t * 0.8 + x * 0.02 + y * 0.02) * 0.5 + 0.5;
-          ctx.globalAlpha = 0.03 + pulse * 0.06;
+      const width = canvas.width;
+      const height = canvas.height;
+      const centerX = width * 0.62; // Center right
+      // Pan globe upwards on scroll
+      const centerY = height * (0.52 - scrollProgress * 0.22);
+
+      // Base globe configuration
+      const radius = Math.min(width, height) * 0.28;
+      // Zoom in on scroll
+      const cameraZ = 1200 - scrollProgress * 650;
+      const fov = 850;
+
+      timeRef.current += 0.012;
+
+      // Update rotation angles
+      let targetRx = 0.35 + scrollProgress * 0.45;
+      let targetRy = timeRef.current * 0.08 + scrollProgress * Math.PI * 1.5;
+
+      if (selectedTarget) {
+        // Smoothly center on selected target
+        targetRy = -selectedTarget.lon;
+        targetRx = -selectedTarget.lat;
+      }
+
+      // Linear interpolation (lerp) for camera rotation angles
+      anglesRef.current.rx = anglesRef.current.rx * 0.94 + targetRx * 0.06;
+      anglesRef.current.ry = anglesRef.current.ry * 0.94 + targetRy * 0.06;
+
+      const rx = anglesRef.current.rx;
+      const ry = anglesRef.current.ry;
+
+      /* 1. DRAW ATMOSPHERE GLOW */
+      const atmosGrad = ctx.createRadialGradient(
+        centerX, centerY, radius * 0.9,
+        centerX, centerY, radius * 1.3
+      );
+      atmosGrad.addColorStop(0, 'rgba(0, 229, 255, 0.08)');
+      atmosGrad.addColorStop(0.3, 'rgba(0, 229, 255, 0.04)');
+      atmosGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = atmosGrad;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius * 1.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Earth outer rim circle
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.15)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Sonar sweep background arc
+      const radarAngle = (timeRef.current * 0.5) % (Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius * 1.08, radarAngle, radarAngle + 0.8);
+      ctx.stroke();
+
+      /* 2. PROJECT AND DRAW GLOBE SURFACE POINTS */
+      const projectedPoints = [];
+      spherePointsRef.current.forEach(pt => {
+        // Spherical to 3D Cartesian
+        const x = radius * Math.cos(pt.lat) * Math.sin(pt.lon);
+        const y = radius * Math.sin(pt.lat);
+        const z = radius * Math.cos(pt.lat) * Math.cos(pt.lon);
+
+        // Y-axis rotation (spin)
+        let x1 = x * Math.cos(ry) - z * Math.sin(ry);
+        let z1 = x * Math.sin(ry) + z * Math.cos(ry);
+        let y1 = y;
+
+        // X-axis rotation (tilt)
+        let x2 = x1;
+        let y2 = y1 * Math.cos(rx) - z1 * Math.sin(rx);
+        let z2 = y1 * Math.sin(rx) + z1 * Math.cos(rx);
+
+        // We show front hemisphere fully, back hemisphere very faded
+        const isFront = z2 <= 0;
+        const scale = fov / (fov + z2 + cameraZ);
+        const sx = centerX + x2 * scale;
+        const sy = centerY + y2 * scale;
+
+        // Clip out points outside boundary circle (sphere shape)
+        const dx = sx - centerX;
+        const dy = sy - centerY;
+        const distToCenter = Math.sqrt(dx*dx + dy*dy);
+
+        if (distToCenter <= radius * 1.01) {
           ctx.beginPath();
-          ctx.arc(x, y, 0.8, 0, Math.PI * 2);
+          ctx.arc(sx, sy, pt.isLand ? 0.9 : 0.6, 0, Math.PI * 2);
+          if (isFront) {
+            ctx.fillStyle = pt.isLand ? 'rgba(0, 229, 255, 0.4)' : 'rgba(0, 229, 255, 0.15)';
+          } else {
+            ctx.fillStyle = 'rgba(0, 229, 255, 0.05)';
+          }
           ctx.fill();
         }
+      });
+
+      /* 3. DRAW ORBITAL BELTS */
+      const drawOrbit = (orbitRadius, tiltZ, tiltX, speedScale, color) => {
+        const satAngle = timeRef.current * speedScale;
+        ctx.beginPath();
+        const segments = 90;
+        for (let i = 0; i <= segments; i++) {
+          const angle = (i / segments) * Math.PI * 2;
+          const ox = orbitRadius * Math.cos(angle);
+          const oy = 0;
+          const oz = orbitRadius * Math.sin(angle);
+
+          // Tilt Z
+          const tx = ox * Math.cos(tiltZ) - oy * Math.sin(tiltZ);
+          const ty = ox * Math.sin(tiltZ) + oy * Math.cos(tiltZ);
+          const tz = oz;
+
+          // Tilt X
+          const tx2 = tx;
+          const ty2 = ty * Math.cos(tiltX) - tz * Math.sin(tiltX);
+          const tz2 = ty * Math.sin(tiltX) + tz * Math.cos(tiltX);
+
+          // Spin & Tilt globe rotations
+          const rx_f = tx2 * Math.cos(ry) - tz2 * Math.sin(ry);
+          const rz_f = tx2 * Math.sin(ry) + tz2 * Math.cos(ry);
+          const ry_f = ty2 * Math.cos(rx) - rz_f * Math.sin(rx);
+          const rz2_f = ty2 * Math.sin(rx) + rz_f * Math.cos(rx);
+
+          const scale = fov / (fov + rz2_f + cameraZ);
+          const sx = centerX + rx_f * scale;
+          const sy = centerY + ry_f * scale;
+
+          if (rz2_f <= 10) { // Faint path on front
+            if (i === 0) ctx.moveTo(sx, sy);
+            else ctx.lineTo(sx, sy);
+          }
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+
+        // Active satellite point
+        const sx_sat = orbitRadius * Math.cos(satAngle);
+        const sy_sat = 0;
+        const sz_sat = orbitRadius * Math.sin(satAngle);
+
+        const tx_s = sx_sat * Math.cos(tiltZ) - sy_sat * Math.sin(tiltZ);
+        const ty_s = sx_sat * Math.sin(tiltZ) + sy_sat * Math.cos(tiltZ);
+        const tz_s = sz_sat;
+
+        const tx2_s = tx_s;
+        const ty2_s = ty_s * Math.cos(tiltX) - tz_s * Math.sin(tiltX);
+        const tz2_s = ty_s * Math.sin(tiltX) + tz_s * Math.cos(tiltX);
+
+        const rx_fs = tx2_s * Math.cos(ry) - tz2_s * Math.sin(ry);
+        const rz_fs = tx2_s * Math.sin(ry) + tz2_s * Math.cos(ry);
+        const ry_fs = ty2_s * Math.cos(rx) - rz_fs * Math.sin(rx);
+        const rz2_fs = ty2_s * Math.sin(rx) + rz_fs * Math.cos(rx);
+
+        if (rz2_fs <= 0) {
+          const scale = fov / (fov + rz2_fs + cameraZ);
+          const sx = centerX + rx_fs * scale;
+          const sy = centerY + ry_fs * scale;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+          ctx.fillStyle = '#00E5FF';
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = '#00E5FF';
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          ctx.font = '7px monospace';
+          ctx.fillStyle = 'rgba(0, 229, 255, 0.45)';
+          ctx.fillText(`ORB-SAT-${Math.floor(orbitRadius)}`, sx + 8, sy - 2);
+        }
+      };
+
+      drawOrbit(radius * 1.15, 0.4, 0.2, 0.15, 'rgba(0, 229, 255, 0.15)');
+      drawOrbit(radius * 1.30, -0.3, 0.4, -0.10, 'rgba(255, 174, 0, 0.12)');
+
+      /* 4. RENDER TARGETS ON GLOBE */
+      const projectedTargets = [];
+      TARGETS_DATA.forEach(tgt => {
+        const x = radius * Math.cos(tgt.lat) * Math.sin(tgt.lon);
+        const y = radius * Math.sin(tgt.lat);
+        const z = radius * Math.cos(tgt.lat) * Math.cos(tgt.lon);
+
+        let x1 = x * Math.cos(ry) - z * Math.sin(ry);
+        let z1 = x * Math.sin(ry) + z * Math.cos(ry);
+        let y1 = y;
+
+        let x2 = x1;
+        let y2 = y1 * Math.cos(rx) - z1 * Math.sin(rx);
+        let z2 = y1 * Math.sin(rx) + z1 * Math.cos(rx);
+
+        const isFront = z2 <= 20;
+        const scale = fov / (fov + z2 + cameraZ);
+        const sx = centerX + x2 * scale;
+        const sy = centerY + y2 * scale;
+
+        projectedTargets.push({ ...tgt, sx, sy, z2, isFront });
+      });
+
+      // Draw connection links between certain targets
+      ctx.beginPath();
+      for (let i = 0; i < projectedTargets.length - 1; i++) {
+        const p1 = projectedTargets[i];
+        const p2 = projectedTargets[i + 1];
+        if (p1.isFront && p2.isFront) {
+          ctx.beginPath();
+          ctx.moveTo(p1.sx, p1.sy);
+          const midX = (p1.sx + p2.sx) / 2;
+          const midY = (p1.sy + p2.sy) / 2;
+          const dx = p1.sx - p2.sx;
+          const dy = p1.sy - p2.sy;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          // Pull arc outward slightly
+          const nx = -dy / dist;
+          const ny = dx / dist;
+          const cpX = midX + nx * (dist * 0.15);
+          const cpY = midY + ny * (dist * 0.15);
+
+          ctx.quadraticCurveTo(cpX, cpY, p2.sx, p2.sy);
+          ctx.strokeStyle = 'rgba(0, 229, 255, 0.15)';
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+
+          // Animated pulse diode
+          const pulseT = (timeRef.current * 0.2 + i * 0.3) % 1.0;
+          const bx = (1 - pulseT) * (1 - pulseT) * p1.sx + 2 * (1 - pulseT) * pulseT * cpX + pulseT * pulseT * p2.sx;
+          const by = (1 - pulseT) * (1 - pulseT) * p1.sy + 2 * (1 - pulseT) * pulseT * cpY + pulseT * pulseT * p2.sy;
+
+          ctx.beginPath();
+          ctx.arc(bx, by, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = '#00E5FF';
+          ctx.shadowBlur = 6;
+          ctx.shadowColor = '#00E5FF';
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
       }
-      ctx.globalAlpha = 1;
 
-      // Horizontal scan line
-      const scanY = ((t * 60) % canvas.height);
-      const grad = ctx.createLinearGradient(0, scanY - 60, 0, scanY + 60);
-      grad.addColorStop(0, 'transparent');
-      grad.addColorStop(0.5, 'rgba(0, 229, 255, 0.03)');
-      grad.addColorStop(1, 'transparent');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, scanY - 60, canvas.width, 120);
+      // Draw targets
+      projectedTargets.forEach(tgt => {
+        if (!tgt.isFront) return;
 
-      t += 0.016;
+        const isSelected = selectedTarget && selectedTarget.id === tgt.id;
+        const color = tgt.status === 'ENGAGE' ? '#FF3B30' : tgt.status === 'FIX' ? '#FFAE00' : '#00E5FF';
+
+        // Glowing point
+        ctx.beginPath();
+        ctx.arc(tgt.sx, tgt.sy, isSelected ? 4.5 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.shadowBlur = isSelected ? 12 : 5;
+        ctx.shadowColor = color;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Subdued target text tag
+        ctx.font = '8px monospace';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+        ctx.fillText(tgt.name.slice(0, 16), tgt.sx + 8, tgt.sy + 3);
+
+        // Blinking crosshair for lock-on or selection
+        if (isSelected) {
+          const pulse = Math.sin(timeRef.current * 8) * 4 + 14;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.arc(tgt.sx, tgt.sy, pulse, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Reticle hair marks
+          ctx.beginPath();
+          ctx.moveTo(tgt.sx - pulse - 3, tgt.sy);
+          ctx.lineTo(tgt.sx + pulse + 3, tgt.sy);
+          ctx.moveTo(tgt.sx, tgt.sy - pulse - 3);
+          ctx.lineTo(tgt.sx, tgt.sy + pulse + 3);
+          ctx.stroke();
+
+          // Reticle values
+          ctx.fillStyle = color;
+          ctx.fillText(`LOCKED // DEC: ${(tgt.lat * 57.3).toFixed(2)}° N`, tgt.sx + pulse + 6, tgt.sy - 6);
+          ctx.fillText(`RNG: ${tgt.risk}`, tgt.sx + pulse + 6, tgt.sy + 4);
+        }
+      });
+
       animId = requestAnimationFrame(draw);
     };
+
     draw();
-    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', resize); };
-  }, []);
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />;
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener('resize', resize);
+    };
+  }, [scrollProgress, selectedTarget]);
+
+  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0 bg-[#07090D]" />;
 }
 
-/* ── Animated Radar ─────────────────────────────────────────────────────── */
-function RadarDisplay() {
-  return (
-    <div className="relative w-48 h-48 mx-auto">
-      {/* Radar rings */}
-      {[1, 2, 3, 4].map(i => (
-        <div
-          key={i}
-          className="absolute inset-0 m-auto rounded-full border border-cyan-400/20"
-          style={{
-            width: `${i * 25}%`,
-            height: `${i * 25}%`,
-            top: '50%', left: '50%',
-            transform: 'translate(-50%, -50%)'
-          }}
-        />
-      ))}
-      {/* Crosshairs */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="w-full h-px bg-cyan-400/20" />
-      </div>
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="h-full w-px bg-cyan-400/20" />
-      </div>
-      {/* Sweep arm */}
-      <div className="absolute inset-0 flex items-center justify-center overflow-hidden rounded-full" style={{ animation: 'radar-sweep 4s linear infinite' }}>
-        <div style={{
-          position: 'absolute',
-          top: 0, left: '50%',
-          width: '50%', height: '50%',
-          background: 'conic-gradient(from 0deg at 0% 100%, rgba(0,229,255,0.5) 0deg, transparent 90deg)',
-          transformOrigin: '0% 100%',
-        }} />
-      </div>
-      {/* Blinking dots */}
-      {[
-        { x: '35%', y: '28%', delay: '0s' },
-        { x: '62%', y: '55%', delay: '0.8s' },
-        { x: '25%', y: '65%', delay: '1.6s' },
-      ].map((dot, i) => (
-        <div
-          key={i}
-          className="absolute w-1.5 h-1.5 rounded-full bg-cyan-400"
-          style={{
-            left: dot.x, top: dot.y,
-            animation: `target-pulse 2s ${dot.delay} ease-in-out infinite`,
-            boxShadow: '0 0 6px #00e5ff'
-          }}
-        />
-      ))}
-      {/* Center dot */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="w-2 h-2 rounded-full bg-cyan-400" style={{ boxShadow: '0 0 10px #00e5ff' }} />
-      </div>
-    </div>
-  );
-}
-
-/* ── Typewriter headline ────────────────────────────────────────────────── */
-function TypewriterText({ text, className, speed = 40 }) {
-  const [displayed, setDisplayed] = useState('');
-  useEffect(() => {
-    let i = 0;
-    const id = setInterval(() => {
-      setDisplayed(text.slice(0, i + 1));
-      i++;
-      if (i >= text.length) clearInterval(id);
-    }, speed);
-    return () => clearInterval(id);
-  }, [text, speed]);
-  return <span className={className}>{displayed}<span className="animate-pulse">▌</span></span>;
-}
-
-/* ── Stat counter card ──────────────────────────────────────────────────── */
-function StatCard({ value, label, delay }) {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      let start = 0;
-      const end = parseInt(value.replace(/\D/g, ''));
-      const duration = 1500;
-      const step = duration / end;
-      const timer = setInterval(() => {
-        start += Math.ceil(end / 60);
-        if (start >= end) { setCount(end); clearInterval(timer); }
-        else setCount(start);
-      }, step > 0 ? step : 16);
-    }, delay);
-    return () => clearTimeout(timeout);
-  }, [value, delay]);
-
-  const formatted = value.includes('M') ? `${count.toLocaleString()}M+` :
-    value.includes('B') ? `${count}B+` : `${count.toLocaleString()}+`;
-
-  return (
-    <div className="hud-panel p-5 flex flex-col gap-1 min-w-[140px] text-center">
-      <span className="font-mono text-2xl font-bold text-cyan-400" style={{ textShadow: '0 0 20px rgba(0,229,255,0.5)' }}>
-        {formatted}
-      </span>
-      <span className="text-xs font-mono text-slate-400 uppercase tracking-widest">{label}</span>
-    </div>
-  );
-}
-
-/* ── Feature row ────────────────────────────────────────────────────────── */
-function FeatureRow({ icon, title, desc, delay }) {
-  const [visible, setVisible] = useState(false);
-  const ref = useRef();
-  useEffect(() => {
-    const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) setVisible(true); }, { threshold: 0.2 });
-    if (ref.current) obs.observe(ref.current);
-    return () => obs.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      className="hud-panel p-6 flex gap-5 items-start transition-all duration-700"
-      style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateX(0)' : 'translateX(-30px)',
-        transitionDelay: `${delay}ms`
-      }}
-    >
-      <div className="text-3xl">{icon}</div>
-      <div>
-        <h3 className="text-sm font-mono font-bold text-cyan-400 uppercase tracking-wider mb-1">{title}</h3>
-        <p className="text-sm text-slate-400 leading-relaxed">{desc}</p>
-      </div>
-    </div>
-  );
-}
-
-/* ── Main Landing Page ──────────────────────────────────────────────────── */
+/* ── MAIN LANDING PAGE ──────────────────────────────────────────────────── */
 export default function Landing() {
   const navigate = useNavigate();
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [selectedTarget, setSelectedTarget] = useState(TARGETS_DATA[0]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [bootText, setBootText] = useState([]);
   const [bootDone, setBootDone] = useState(false);
 
   const bootLines = [
-    'AURA CONSOLE v4.7.2 — INITIALIZING...',
-    'LOADING THREAT INTELLIGENCE MODULES...',
-    'SECURE CHANNEL ESTABLISHED [AES-256-GCM]',
-    'NEURAL PATTERN RECOGNITION: ONLINE',
-    'FINANCIAL CRIME ENGINE: ARMED',
-    'ALL SYSTEMS NOMINAL. AWAITING OPERATOR.',
+    'AURA CONSOLE v4.7.2 — INITIALIZING GLOBAL THREAT MATRIX...',
+    'CONNECTING SATELLITE CHANNELS [NODE: IN-DEL-01]...',
+    'SCANNING BATTLESPACE TRANSACTIONS: ACC_0042...',
+    'NEURAL LAYER RECOGNITION ARMED [clearance=ALPHA-III]...',
+    'READY FOR OPERATOR LOG.'
   ];
 
+  // Live clock
+  const [timeStr, setTimeStr] = useState('');
   useEffect(() => {
-    let i = 0;
-    const id = setInterval(() => {
-      setBootText(prev => [...prev, bootLines[i]]);
-      i++;
-      if (i >= bootLines.length) { clearInterval(id); setTimeout(() => setBootDone(true), 600); }
-    }, 320);
-    return () => clearInterval(id);
+    const updateTime = () => {
+      const now = new Date();
+      setTimeStr(now.toISOString().substring(11, 19));
+    };
+    updateTime();
+    const t = setInterval(updateTime, 1000);
+    return () => clearInterval(t);
   }, []);
 
+  // Sync scroll
+  useEffect(() => {
+    const handleScroll = () => {
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+      const progress = maxScroll > 0 ? window.scrollY / maxScroll : 0;
+      setScrollProgress(progress);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Boot terminal sequence
+  useEffect(() => {
+    let i = 0;
+    const interval = setInterval(() => {
+      setBootText(prev => [...prev, bootLines[i]]);
+      i++;
+      if (i >= bootLines.length) {
+        clearInterval(interval);
+        setBootDone(true);
+      }
+    }, 280);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Filter targets list
+  const filteredTargets = TARGETS_DATA.filter(t =>
+    t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    t.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    t.type.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Transition opacities based on scroll progress
+  // Fades out the initial HUD console view when scrolling down
+  const initialHUDOpacity = Math.max(0, 1 - scrollProgress * 5); // Fades out completely at 20% scroll
+  // Fades in the detailed information modules as user scrolls down
+  const scrollContentOpacity = Math.min(1, Math.max(0, (scrollProgress - 0.1) * 3));
+
   return (
-    <div className="relative min-h-screen bg-aura-bg text-slate-300 overflow-x-hidden">
-      <TacticalCanvas />
+    <div className="relative min-h-[300vh] text-slate-300 font-sans select-none overflow-x-hidden">
+      {/* 3D Global Tactical Canvas */}
+      <TacticalGlobe
+        scrollProgress={scrollProgress}
+        selectedTarget={selectedTarget}
+        onTargetSelected={setSelectedTarget}
+      />
 
-      {/* ── NAV ─────────────────────────────────────────────────────────── */}
-      <nav className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-cyan-400/10 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          {/* Logo mark */}
-          <svg width="28" height="28" viewBox="0 0 401 494" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M371.9 357.3L400.4 410.4L200.4 493.2L0.4 410.4L28.9 357.3L200.4 429.3L371.9 357.3Z M200.4 0.7C306.3 0.7 392.3 84.2 392.3 187.2C392.3 290.2 306.4 373.7 200.4 373.7C94.4 373.7 8.5 290.2 8.5 187.2C8.5 84.2 94.4 0.7 200.4 0.7ZM200.4 58.4C127.1 58.4 67.8 116.1 67.8 187.3C67.8 258.5 127.2 316.3 200.4 316.3C273.7 316.3 333.1 258.6 333.1 187.4C333.1 116.2 273.7 58.4 200.4 58.4Z" fill="#00E5FF"/>
-          </svg>
-          <span className="font-mono text-sm font-bold tracking-[0.3em] text-white uppercase">AURA</span>
-          <span className="font-mono text-xs text-cyan-400/50 hidden sm:inline">// FINANCIAL CRIME ENGINE</span>
-        </div>
-        <div className="flex items-center gap-2 sm:gap-4">
-          <span className="hidden md:block font-mono text-xs text-slate-500">
-            UTC {new Date().toISOString().substr(11, 8)} Z
-          </span>
-          <button
-            onClick={() => navigate('/login')}
-            className="font-mono text-xs uppercase tracking-widest px-4 py-2 border border-cyan-400/40 text-cyan-400 hover:bg-cyan-400/10 hover:border-cyan-400 transition-all duration-200"
-          >
-            OPERATOR LOGIN
-          </button>
-          <button
-            onClick={() => navigate('/login')}
-            className="font-mono text-xs uppercase tracking-widest px-4 py-2 bg-cyan-400 text-aura-bg hover:bg-cyan-300 transition-all duration-200 font-bold"
-          >
-            LAUNCH CONSOLE →
-          </button>
-        </div>
-      </nav>
-
-      {/* ── HERO ────────────────────────────────────────────────────────── */}
-      <section className="relative z-10 flex flex-col lg:flex-row items-center justify-center gap-12 px-8 pt-16 pb-20 max-w-7xl mx-auto">
-        {/* Left side */}
-        <div className="flex-1 max-w-2xl">
-          {/* Boot terminal */}
-          <div className="mb-8 font-mono text-xs text-green-400/70 space-y-0.5">
-            {bootText.map((line, i) => (
-              <div key={i} style={{ animation: 'terminal-flicker 4s infinite', animationDelay: `${i * 0.1}s` }}>
-                <span className="text-cyan-400/40 mr-2">[{String(i + 1).padStart(2, '0')}]</span>
-                {line}
-              </div>
-            ))}
+      {/* ── SCREEN 1: GOTHAM CONSOLE HUD OVERLAY (Fixed while scrollProgress is low) ── */}
+      <div
+        className="fixed inset-0 z-10 flex flex-col justify-between pointer-events-none transition-all duration-300"
+        style={{ opacity: initialHUDOpacity, visibility: initialHUDOpacity === 0 ? 'hidden' : 'visible' }}
+      >
+        {/* Navigation / Top Telemetry bar */}
+        <header className="w-full flex items-center justify-between px-6 py-3 border-b border-cyan-500/10 bg-black/40 backdrop-blur-sm pointer-events-auto">
+          <div className="flex items-center gap-3">
+            <svg width="24" height="24" viewBox="0 0 401 494" fill="none" className="animate-pulse">
+              <path d="M371.9 357.3L400.4 410.4L200.4 493.2L0.4 410.4L28.9 357.3L200.4 429.3L371.9 357.3Z M200.4 0.7C306.3 0.7 392.3 84.2 392.3 187.2C392.3 290.2 306.4 373.7 200.4 373.7C94.4 373.7 8.5 290.2 8.5 187.2C8.5 84.2 94.4 0.7 200.4 0.7ZM200.4 58.4C127.1 58.4 67.8 116.1 67.8 187.3C67.8 258.5 127.2 316.3 200.4 316.3C273.7 316.3 333.1 258.6 333.1 187.4C333.1 116.2 273.7 58.4 200.4 58.4Z" fill="#00E5FF"/>
+            </svg>
+            <span className="font-mono text-sm font-bold tracking-[0.2em] text-white">AURA</span>
+            <div className="h-4 w-px bg-slate-700 mx-1 hidden sm:block" />
+            <div className="hidden sm:flex gap-1.5 items-center font-mono text-[10px] text-slate-400">
+              <button className="px-2 py-0.5 border border-slate-700 hover:border-cyan-400/50 bg-slate-900/60 rounded">BOARD: OP RADIANT FALCON</button>
+              <button className="px-1.5 py-0.5 border border-slate-800 text-slate-500 hover:text-slate-400">+</button>
+            </div>
           </div>
 
-          <div className="mb-4 flex items-center gap-3">
-            <div className="h-px flex-1 bg-gradient-to-r from-cyan-400/60 to-transparent" />
-            <span className="font-mono text-xs text-cyan-400/60 uppercase tracking-[0.3em]">CLASSIFIED SYSTEM</span>
-            <div className="h-px flex-1 bg-gradient-to-l from-cyan-400/60 to-transparent" />
+          <div className="flex items-center gap-6">
+            <span className="font-mono text-xs text-cyan-400/60 tracking-wider hidden md:block">
+              // UTC {timeStr} Z [DEL: 28.61° N, 77.20° E]
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/login')}
+                className="font-mono text-[11px] uppercase tracking-widest px-4 py-1.5 border border-cyan-400/35 text-cyan-400 hover:bg-cyan-400/10 transition-all rounded"
+              >
+                Get Started
+              </button>
+              <button
+                onClick={() => navigate('/login')}
+                className="p-1.5 text-slate-400 hover:text-white transition-colors"
+                title="Search Console"
+              >
+                🔍
+              </button>
+              <button
+                onClick={() => navigate('/login')}
+                className="p-1.5 text-slate-400 hover:text-white transition-colors"
+                title="System Menu"
+              >
+                ☰
+              </button>
+            </div>
           </div>
+        </header>
 
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight text-white mb-6" style={{ letterSpacing: '-0.01em' }}>
-            The Operating<br />
-            <span style={{ color: '#00E5FF', textShadow: '0 0 40px rgba(0,229,255,0.4)' }}>System for</span><br />
-            Financial Crime
-          </h1>
-
-          <p className="text-slate-400 text-base leading-relaxed mb-8 max-w-xl font-light">
-            AURA surfaces hidden transaction networks, traces money trails through millions of entities, and delivers
-            actionable intelligence to financial investigators — at machine speed.
-          </p>
-
-          <div className="flex flex-wrap gap-4">
-            <button
-              id="landing-launch-btn"
-              onClick={() => navigate('/login')}
-              className="group relative font-mono text-sm uppercase tracking-widest px-8 py-4 bg-cyan-400 text-aura-bg font-bold hover:bg-cyan-300 transition-all duration-200 flex items-center gap-3 overflow-hidden"
-            >
-              <span className="relative z-10">LAUNCH CONSOLE</span>
-              <span className="relative z-10 group-hover:translate-x-1 transition-transform duration-200">→</span>
-              <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-5 transition-opacity" />
-            </button>
-            <button
-              id="landing-demo-btn"
-              onClick={() => navigate('/login')}
-              className="font-mono text-sm uppercase tracking-widest px-8 py-4 border border-cyan-400/30 text-slate-400 hover:text-cyan-400 hover:border-cyan-400/60 transition-all duration-200"
-            >
-              REQUEST ACCESS
-            </button>
-          </div>
-
-          {/* Certifications row */}
-          <div className="mt-10 flex flex-wrap gap-3">
-            {['FedRAMP', 'SOC 2 TYPE II', 'ISO 27001', 'AML-GRADE', 'ZERO-TRUST'].map(cert => (
-              <span key={cert} className="font-mono text-[10px] uppercase tracking-widest px-2.5 py-1 border border-slate-700 text-slate-500">
-                / {cert}
+        {/* HUD Middle Area: Left Targets Sidebar + Globe center grid */}
+        <div className="flex-1 flex overflow-hidden relative">
+          
+          {/* LEFT SIDEBAR: TARGET BOARD */}
+          <aside className="w-80 border-r border-cyan-500/10 bg-black/45 backdrop-blur-md flex flex-col p-4 pointer-events-auto">
+            <div className="flex justify-between items-center mb-3">
+              <span className="font-mono text-[11px] text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" /> TARGET BOARD
               </span>
-            ))}
+              <span className="font-mono text-[9px] text-slate-500 uppercase">1 active</span>
+            </div>
+
+            <div className="hud-panel p-2 mb-3 bg-cyan-950/20 border-cyan-500/20 text-cyan-400 font-mono text-[10px] flex justify-between items-center">
+              <span>◉ OP RADIANT FALCON</span>
+              <span className="text-slate-500 cursor-pointer">✕</span>
+            </div>
+
+            {/* Target search bar */}
+            <div className="relative mb-4">
+              <input
+                type="text"
+                placeholder="Search targets..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-900/80 border border-slate-800 focus:border-cyan-400/50 outline-none text-xs font-mono py-1.5 pl-3 pr-8 text-white rounded"
+              />
+              <span className="absolute right-2 top-2 text-[10px] opacity-40">⚙️</span>
+            </div>
+
+            {/* Filters toolbar */}
+            <div className="grid grid-cols-3 gap-1 mb-4 font-mono text-[8px] text-center text-slate-400">
+              <button className="py-1 border border-slate-800 hover:bg-slate-900 rounded">◉ STAGE</button>
+              <button className="py-1 border border-slate-800 hover:bg-slate-900 rounded">◉ STATUS</button>
+              <button className="py-1 border border-slate-800 hover:bg-slate-900 rounded">◉ TARGETS</button>
+            </div>
+
+            {/* Recommendation line */}
+            <button
+              onClick={() => navigate('/login')}
+              className="w-full py-2 bg-slate-900/90 border border-cyan-500/20 text-cyan-400 hover:bg-cyan-950/30 text-left pl-3 font-mono text-[10px] flex items-center justify-between mb-4 transition-colors rounded"
+            >
+              <span>Recommend Taskings</span>
+              <span className="pr-2">➔</span>
+            </button>
+
+            {/* Target List */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+              {filteredTargets.map(tgt => {
+                const isSelected = selectedTarget && selectedTarget.id === tgt.id;
+                const statusColor = tgt.status === 'ENGAGE' ? 'text-red-400 border-red-500/30' : tgt.status === 'FIX' ? 'text-amber-400 border-amber-500/30' : 'text-cyan-400 border-cyan-500/30';
+                
+                return (
+                  <div
+                    key={tgt.id}
+                    onClick={() => setSelectedTarget(tgt)}
+                    className={`hud-panel p-3 cursor-pointer transition-all duration-200 ${isSelected ? 'border-cyan-400 bg-cyan-950/20 shadow-[0_0_10px_rgba(0,229,255,0.1)]' : 'border-slate-800 hover:border-slate-700 bg-slate-900/40'}`}
+                  >
+                    <div className="flex justify-between items-start mb-1.5">
+                      <span className="font-mono text-[11px] font-bold text-white block truncate max-w-[150px]">
+                        {tgt.name}
+                      </span>
+                      <span className="font-mono text-[9px] text-cyan-400/50 uppercase">
+                        {tgt.risk}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono text-[9px] text-slate-400">{tgt.type}</span>
+                      <span className="font-mono text-[8px] text-slate-500 truncate max-w-[100px]">{tgt.id}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-slate-800/40 pt-2 font-mono text-[8px]">
+                      <span className={`px-2 py-0.5 border rounded uppercase ${statusColor}`}>
+                        {tgt.status}
+                      </span>
+                      <span className="text-slate-500 tracking-tighter">
+                        {tgt.hash}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
+
+          {/* Center Coordinates Legend HUD marker */}
+          <div className="absolute right-6 top-6 flex flex-col font-mono text-[9px] text-slate-500 text-right pointer-events-none">
+            <span>AZIMUTH: {(anglesRef.current.ry * 57.3).toFixed(1)}°</span>
+            <span>ELEVATION: {(anglesRef.current.rx * 57.3).toFixed(1)}°</span>
+            <span>BATTLESPACE: ACTIVE DETECTED</span>
           </div>
         </div>
 
-        {/* Right side - Radar + telemetry */}
-        <div className="flex-shrink-0 flex flex-col items-center gap-6">
-          <div className="hud-panel p-8 radar-sweep-effect">
-            <div className="font-mono text-[10px] text-cyan-400/50 mb-3 uppercase tracking-widest text-center">
-              THREAT TRACKING SYSTEM
+        {/* FOOTER: Giant "AURA" Title Overlay & Telemetry Columns */}
+        <div className="w-full relative flex flex-col justify-end px-8 pb-4">
+          
+          {/* Telemetry info row */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-7xl mx-auto w-full border-t border-slate-800/60 pt-4 mb-2 font-mono text-[9px] text-slate-400 pointer-events-auto">
+            <div>
+              <div className="text-slate-500 uppercase tracking-widest mb-0.5">YOU ARE NOW</div>
+              <div className="text-cyan-400 font-bold">ENTERING CENTRAL SYSTEM</div>
             </div>
-            <RadarDisplay />
-            <div className="font-mono text-[10px] text-slate-500 mt-4 space-y-1 text-center">
-              <div>LOC: 28.61° N / 77.20° E</div>
-              <div className="text-green-400">STATUS: TRACKING 3 ACTIVE RINGS</div>
+            <div>
+              <div className="text-slate-500 uppercase tracking-widest mb-0.5">TIME REMAINING</div>
+              <div className="text-white">SCROLL DOWN TO EXPLORE INTERACTIVE CONSOLE</div>
+            </div>
+            <div>
+              <div className="text-slate-500 uppercase tracking-widest mb-0.5">OPERATING MATRIX</div>
+              <div className="text-white">GLOBAL FINANCIAL CRIME INTEL DECISION PLATFORM</div>
+            </div>
+            <div>
+              <div className="text-slate-500 uppercase tracking-widest mb-0.5">INTEL provenance</div>
+              <div className="text-slate-500 uppercase">COPYRIGHT © 2026 AURA TECHNOLOGIES INC.</div>
             </div>
           </div>
 
-          {/* Live feed strip */}
-          <div className="hud-panel p-4 w-full font-mono text-[10px] space-y-1.5">
-            <div className="text-cyan-400/50 uppercase tracking-widest mb-2">// LIVE ALERT FEED</div>
-            {[
-              { lvl: 'CRITICAL', msg: 'Ring detected: ACC_0042 → shell chain' },
-              { lvl: 'HIGH', msg: 'Velocity spike: ACC_0017 +$8.3M/4h' },
-              { lvl: 'MEDIUM', msg: 'Cross-border loop: 7 entities, 3 jxns' },
-            ].map((a, i) => (
-              <div key={i} className="flex gap-2 items-center">
-                <span className={`px-1 ${a.lvl === 'CRITICAL' ? 'text-red-400' : a.lvl === 'HIGH' ? 'text-orange-400' : 'text-yellow-400'}`}>
-                  [{a.lvl}]
+          {/* Giant Title Overlay */}
+          <div className="text-center overflow-hidden">
+            <h1 className="text-[13vw] font-bold text-white/5 tracking-tighter uppercase leading-[0.8] select-none font-sans">
+              AURA
+            </h1>
+          </div>
+        </div>
+      </div>
+
+      {/* ── SCREEN 2: SCROLLABLE LANDING INFORMATION VIEW ── */}
+      <div
+        className="relative z-20 w-full pt-[100vh] pb-24 transition-opacity duration-300"
+        style={{ opacity: scrollContentOpacity, pointerEvents: scrollProgress > 0.08 ? 'auto' : 'none' }}
+      >
+        <div className="max-w-7xl mx-auto px-6 space-y-24">
+
+          {/* 1. HERO CONTENT BLOCK */}
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-12 pt-12">
+            
+            {/* Left Column: Boot terminal & titles */}
+            <div className="flex-1 max-w-2xl bg-black/60 p-8 border border-slate-800/60 rounded-lg backdrop-blur-md">
+              
+              {/* Boot console strip */}
+              <div className="mb-6 font-mono text-[10px] text-green-400/80 space-y-0.5">
+                {bootText.map((line, i) => (
+                  <div key={i} className="flex gap-2">
+                    <span className="text-cyan-400/30">[{String(i + 1).padStart(2, '0')}]</span>
+                    <span>{line}</span>
+                  </div>
+                ))}
+                {!bootDone && <span className="animate-pulse">▌</span>}
+              </div>
+
+              <div className="mb-4 flex items-center gap-3">
+                <div className="h-px flex-1 bg-gradient-to-r from-cyan-400/60 to-transparent" />
+                <span className="font-mono text-[9px] text-cyan-400/80 uppercase tracking-[0.25em]">CLASSIFIED INTEL GATEWAY</span>
+                <div className="h-px flex-1 bg-gradient-to-l from-cyan-400/60 to-transparent" />
+              </div>
+
+              <h2 className="text-4xl sm:text-5xl font-bold leading-none text-white mb-6 tracking-tight">
+                The Operating System for <br />
+                <span className="text-cyan-400" style={{ textShadow: '0 0 35px rgba(0,229,255,0.3)' }}>
+                  Financial Crime Tracking
                 </span>
-                <span className="text-slate-500 truncate">{a.msg}</span>
+              </h2>
+
+              <p className="text-slate-400 text-sm leading-relaxed mb-8 max-w-xl font-light">
+                AURA unifies transaction networks, tracks multi-hop laundering trails through complex entities, 
+                and delivers actionable mapping alerts for compliance teams and financial crime intelligence.
+              </p>
+
+              <div className="flex flex-wrap gap-4">
+                <button
+                  onClick={() => navigate('/login')}
+                  className="group relative font-mono text-[11px] uppercase tracking-widest px-8 py-3.5 bg-cyan-400 text-slate-900 font-bold hover:bg-cyan-300 transition-all flex items-center gap-3 overflow-hidden rounded"
+                >
+                  <span>LAUNCH OPERATIONAL CONSOLE</span>
+                  <span>➔</span>
+                </button>
+                <button
+                  onClick={() => navigate('/login')}
+                  className="font-mono text-[11px] uppercase tracking-widest px-8 py-3.5 border border-cyan-400/30 text-slate-400 hover:text-cyan-400 hover:border-cyan-400 transition-all rounded"
+                >
+                  REQUEST ACCESS clearance
+                </button>
+              </div>
+
+              {/* Badges list */}
+              <div className="mt-8 flex flex-wrap gap-2.5">
+                {['FedRAMP', 'SOC 2 CERTIFIED', 'AML-GRADE', 'ZERO TRUST', 'ISO 27001'].map(tag => (
+                  <span key={tag} className="font-mono text-[9px] uppercase tracking-wider px-2 py-0.5 border border-slate-800 text-slate-500 rounded">
+                    // {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Right Column: Mini threat board overview */}
+            <div className="w-full lg:w-96 flex flex-col gap-4">
+              <div className="hud-panel p-6 bg-black/60 backdrop-blur-md">
+                <span className="font-mono text-[10px] text-cyan-400/50 uppercase tracking-widest block mb-4">
+                  // REAL-TIME SECURITY ALERTS
+                </span>
+
+                <div className="space-y-3 font-mono text-[10px]">
+                  <div className="flex items-start gap-2 border-b border-slate-900 pb-2">
+                    <span className="text-red-400">[CRITICAL]</span>
+                    <span className="text-slate-400">Loop flow: ACC_0042 &rarr; shell chain</span>
+                  </div>
+                  <div className="flex items-start gap-2 border-b border-slate-900 pb-2">
+                    <span className="text-amber-400">[HIGH_VEL]</span>
+                    <span className="text-slate-400">Deposit spike: ACC_0118 +$4.9M/2h</span>
+                  </div>
+                  <div className="flex items-start gap-2 pb-1">
+                    <span className="text-cyan-400">[ANOMALY]</span>
+                    <span className="text-slate-400">Cross-border flow: 8 nested transfers</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hud-panel p-4 bg-black/60 backdrop-blur-md font-mono text-[9px] text-slate-500 space-y-1">
+                <div>TELEMETRY STATION: CLOUD IN-DEL-01</div>
+                <div className="text-green-400">STATE: NETWORK STABLE</div>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. STATS INFO ROW */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-12">
+            {[
+              { val: '200+', label: 'Accounts Tracked' },
+              { val: '2.5K+', label: 'Transactions Analyzed' },
+              { val: '18M+', label: 'Flagged Vol ($)' },
+              { val: '99%', label: 'True Anomaly Detection' }
+            ].map((stat, i) => (
+              <div key={i} className="hud-panel p-5 bg-black/60 text-center backdrop-blur-md rounded">
+                <div className="font-mono text-2xl font-bold text-cyan-400 mb-1">{stat.val}</div>
+                <div className="font-mono text-[10px] text-slate-500 uppercase tracking-widest">{stat.label}</div>
               </div>
             ))}
           </div>
-        </div>
-      </section>
 
-      {/* ── STATS BAR ───────────────────────────────────────────────────── */}
-      <section className="relative z-10 border-y border-cyan-400/10 bg-black/20 backdrop-blur-sm py-10">
-        <div className="max-w-5xl mx-auto px-8 flex flex-wrap justify-center gap-4">
-          <StatCard value="200" label="Accounts Tracked" delay={0} />
-          <StatCard value="2500" label="Transactions/Cycle" delay={200} />
-          <StatCard value="47" label="Alert Patterns" delay={400} />
-          <StatCard value="99" label="Detection Rate %" delay={600} />
-        </div>
-      </section>
+          {/* 3. CAPABILITIES GRID */}
+          <div className="space-y-8 pt-12">
+            <div className="text-center max-w-2xl mx-auto">
+              <span className="font-mono text-[10px] text-cyan-400/50 uppercase tracking-[0.2em] block mb-2">
+                // PLATFORM CORE ABILITIES
+              </span>
+              <h3 className="text-2xl font-bold text-white tracking-tight">
+                Forensic intelligence at machine speed
+              </h3>
+            </div>
 
-      {/* ── FEATURES ────────────────────────────────────────────────────── */}
-      <section className="relative z-10 max-w-6xl mx-auto px-8 py-20">
-        <div className="text-center mb-12">
-          <div className="font-mono text-xs text-cyan-400/50 uppercase tracking-[0.3em] mb-3">// SYSTEM CAPABILITIES</div>
-          <h2 className="text-3xl font-bold text-white">Thousands of Transactions. A Single Pane of Glass.</h2>
-          <p className="text-slate-500 mt-3 max-w-2xl mx-auto text-sm leading-relaxed">
-            AURA joins and enriches massive volumes of near-real-time financial data and surfaces them in a single
-            view, enabling investigators to make faster, more confident decisions together.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FeatureRow delay={0} icon="🕸️" title="Money Trail Graph" desc="Visualize complex transaction networks as force-directed graphs. Trace multi-hop money flows, identify shell chains, and pinpoint primary threat nodes at a glance." />
-          <FeatureRow delay={100} icon="🔴" title="Ring Detection AI" desc="Machine learning models detect cyclical transaction rings, layering, and smurfing patterns — and continuously refine themselves from operator feedback." />
-          <FeatureRow delay={200} icon="⚡" title="Real-Time Alerts" desc="Velocity spikes, cross-border anomalies, and behavioral outliers surface as prioritized alerts before they cascade into untraceable flows." />
-          <FeatureRow delay={300} icon="🔒" title="Multi-Layer Security" desc="FedRAMP Moderate / AML-grade data governance. Granular audit trails on every operator action. Zero-trust architecture throughout." />
-          <FeatureRow delay={400} icon="📡" title="Edge AI Deployment" desc="AURA's feedback loops train and refine models that augment human analysis during live operations. Operator actions improve models over time." />
-          <FeatureRow delay={500} icon="🌐" title="Open & Interoperable" desc="Export all data products with provenance in any format. Seamlessly connect with existing AML / KYC / SWIFT infrastructure." />
-        </div>
-      </section>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                { title: 'Interactive Graph Paths', icon: '🕸️', desc: 'Trace multi-hop transactions visualised as node relationships. Identify layers and cycle rings immediately.' },
+                { title: 'Neural Anomaly Engine', icon: '🧠', desc: 'Continuous machine learning models detect structural anomalies matching classic fraud profiles.' },
+                { title: 'Operational Dossier', icon: '📁', desc: 'Instantly construct individual profiles, tracking net cash velocity, counterparts, and timelines.' }
+              ].map((feat, i) => (
+                <div key={i} className="hud-panel p-6 bg-black/60 backdrop-blur-md rounded">
+                  <div className="text-3xl mb-4">{feat.icon}</div>
+                  <h4 className="font-mono text-xs font-bold text-cyan-400 uppercase tracking-wider mb-2">{feat.title}</h4>
+                  <p className="text-xs text-slate-400 leading-relaxed font-light">{feat.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
 
-      {/* ── QUOTE ───────────────────────────────────────────────────────── */}
-      <section className="relative z-10 border-y border-cyan-400/10 bg-black/30 py-16 px-8">
-        <div className="max-w-3xl mx-auto text-center">
-          <div className="text-cyan-400/20 text-6xl font-serif mb-4">"</div>
-          <blockquote className="text-xl text-white leading-relaxed font-light italic mb-6">
-            You are giving us advantages right now that we need — ground-breaking technologies that help us make
-            better decisions in high-stakes environments.
-          </blockquote>
-          <cite className="font-mono text-xs text-slate-500 uppercase tracking-widest">
-            — Financial Crimes Enforcement Network, Reference Brief
-          </cite>
-        </div>
-      </section>
+          {/* 4. REFERENCE QUOTE */}
+          <div className="hud-panel p-8 bg-black/70 max-w-4xl mx-auto text-center rounded backdrop-blur-md">
+            <span className="text-3xl text-cyan-400/20 block mb-2">“</span>
+            <p className="text-base text-slate-300 font-light italic leading-relaxed mb-4">
+              AURA allows our investigations desk to overlay transactional telemetry instantly, 
+              compressing tracking cycles from days to clicks.
+            </p>
+            <span className="font-mono text-[10px] text-slate-500 uppercase tracking-wider">
+              — FINCEN Intelligence Briefing Note
+            </span>
+          </div>
 
-      {/* ── CTA ─────────────────────────────────────────────────────────── */}
-      <section className="relative z-10 max-w-4xl mx-auto px-8 py-20 text-center">
-        <div className="hud-panel p-12">
-          <div className="font-mono text-xs text-cyan-400/50 uppercase tracking-[0.3em] mb-4">// READY TO OPERATE</div>
-          <h2 className="text-3xl font-bold text-white mb-4">Initiate System Access</h2>
-          <p className="text-slate-500 text-sm mb-8">Reach out to learn more or authenticate with your credentials to access the AURA console.</p>
-          <div className="flex flex-wrap gap-4 justify-center">
+          {/* 5. CALL TO ACTION BLOCK */}
+          <div className="hud-panel p-10 bg-black/70 text-center max-w-3xl mx-auto rounded backdrop-blur-md">
+            <span className="font-mono text-[10px] text-cyan-400/50 uppercase tracking-[0.2em] block mb-2">
+              // OPERATE SYSTEM
+            </span>
+            <h4 className="text-2xl font-bold text-white mb-3">Initialize System Authentication</h4>
+            <p className="text-xs text-slate-400 mb-6 font-light">
+              Enter your credentials to launch the live analytics console.
+            </p>
             <button
-              id="landing-cta-btn"
               onClick={() => navigate('/login')}
-              className="font-mono text-sm uppercase tracking-widest px-10 py-4 bg-cyan-400 text-aura-bg font-bold hover:bg-cyan-300 transition-all duration-200"
+              className="font-mono text-xs font-bold uppercase tracking-widest px-10 py-3.5 bg-cyan-400 text-slate-900 hover:bg-cyan-300 transition-all rounded"
             >
-              AUTHENTICATE NOW →
+              AUTHENTICATE CREDENTIALS
             </button>
           </div>
-          <div className="mt-6 font-mono text-[10px] text-slate-600 uppercase tracking-widest">
-            AURA CONSOLE v4.7.2 · SECURITY LEVEL: ALPHA-III · NODE: IN-DEL-01
-          </div>
-        </div>
-      </section>
 
-      {/* ── FOOTER ──────────────────────────────────────────────────────── */}
-      <footer className="relative z-10 border-t border-cyan-400/10 px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <svg width="16" height="16" viewBox="0 0 401 494" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M371.9 357.3L400.4 410.4L200.4 493.2L0.4 410.4L28.9 357.3L200.4 429.3L371.9 357.3Z M200.4 0.7C306.3 0.7 392.3 84.2 392.3 187.2C392.3 290.2 306.4 373.7 200.4 373.7C94.4 373.7 8.5 290.2 8.5 187.2C8.5 84.2 94.4 0.7 200.4 0.7ZM200.4 58.4C127.1 58.4 67.8 116.1 67.8 187.3C67.8 258.5 127.2 316.3 200.4 316.3C273.7 316.3 333.1 258.6 333.1 187.4C333.1 116.2 273.7 58.4 200.4 58.4Z" fill="#00E5FF" fillOpacity="0.4"/>
-          </svg>
-          <span className="font-mono text-xs text-slate-600">AURA FINANCIAL CRIME ENGINE</span>
+          {/* 6. STATIC SUBTLE FOOTER */}
+          <footer className="w-full flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-800/40 pt-8 font-mono text-[10px] text-slate-600">
+            <span>© 2026 AURA INTEL ENGINE · SYSTEM CLEARANCE REQUIRED</span>
+            <span>SECURE AES-256 CONTEXT</span>
+          </footer>
+
         </div>
-        <span className="font-mono text-xs text-slate-700">© 2024 · SECURITY CLEARANCE REQUIRED · ALL RIGHTS RESERVED</span>
-      </footer>
+      </div>
     </div>
   );
 }
