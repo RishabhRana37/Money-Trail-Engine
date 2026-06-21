@@ -1,15 +1,16 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Lenis from 'lenis';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { ScrollToPlugin } from 'gsap/ScrollToPlugin';
 import * as THREE from 'three';
 
 import dashboardScreenshot from '../assets/dashboard_screenshot.png';
 import graphScreenshot from '../assets/graph_screenshot.png';
 import loginScreenshot from '../assets/login_screenshot.png';
 
-gsap.registerPlugin(ScrollTrigger);
+gsap.registerPlugin(ScrollTrigger, ScrollToPlugin);
 
 /* â”€â”€ MOCK DATA FOR TACTICAL TARGETS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const TARGETS_DATA = [
@@ -1010,14 +1011,9 @@ export default function Landing() {
 
   // Trigger imploding visual effect on authenticate click
   const handleAuthenticate = () => {
-    // Zoom camera in (handled by temporary transition before navigating)
-    gsap.to(window, {
-      duration: 0.8,
-      scrollTo: 0,
-      onComplete: () => {
-        navigate('/login');
-      }
-    });
+    // Smooth-scroll to top, then navigate (native API — no ScrollToPlugin required)
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => navigate('/login'), 600);
   };
 
   // Relocated Get Started button click handler
