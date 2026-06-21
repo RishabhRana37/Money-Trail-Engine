@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Lenis from 'lenis';
 import gsap from 'gsap';
@@ -546,7 +546,7 @@ function WebGLImageReveal({ src, title, description, badge }) {
 }
 
 /* â”€â”€ INTERACTIVE GLASS TEXT EFFECT (AURA HERO) â€” VOLUMETRIC GLASS â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-function AuraTextEffect() {
+function AuraTextEffect({ compact = false }) {
   const [isHovered, setIsHovered] = useState(false);
   const canvasRef    = useRef(null);
   const hoverRef     = useRef(false);
@@ -578,7 +578,10 @@ function AuraTextEffect() {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const W   = canvas.width  / dpr;
       const H   = canvas.height / dpr;
-      const fs  = Math.min(Math.round(W * 0.215), 195);
+      // compact mode: font fills ~70% of height; full mode: % of width
+      const fs  = compact
+        ? Math.min(Math.round(H * 0.68), 72)
+        : Math.min(Math.round(W * 0.215), 195);
       return { W, H, fs };
     };
 
@@ -842,8 +845,10 @@ function AuraTextEffect() {
       ref={containerRef}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className="relative w-full max-w-5xl mx-auto pointer-events-auto select-none cursor-pointer"
-      style={{ height: '240px' }}
+      className={`relative pointer-events-auto select-none cursor-pointer ${
+        compact ? 'w-64' : 'w-full max-w-5xl mx-auto'
+      }`}
+      style={{ height: compact ? '90px' : '240px' }}
     >
       {/* Background prismatic radial glow pool â€” matches the dark halo in reference */}
       <div
@@ -1064,8 +1069,11 @@ export default function Landing() {
         {/* Middle contents: Sidebar & coordinates legend */}
         <div className="flex-1 flex overflow-hidden px-8 py-2 justify-between items-stretch">
           
-          {/* Relocated Primary Action Area */}
-          <div className="w-80 flex flex-col justify-center items-start pointer-events-auto select-none">
+          {/* Relocated Primary Action Area — AURA title + CTA stacked left */}
+          <div className="w-80 flex flex-col justify-center items-start gap-4 pointer-events-auto select-none">
+            {/* Compact glass AURA title above the button */}
+            <AuraTextEffect compact />
+
             <button
               onClick={handleGetStarted}
               className="group flex items-center gap-2.5 font-mono text-xs uppercase tracking-[0.2em] px-8 py-4 border border-cyan-400/50 text-cyan-400 bg-cyan-950/15 hover:bg-cyan-400/20 active:scale-95 active:bg-cyan-400/30 duration-200 rounded shadow-[0_0_15px_rgba(0,229,255,0.08)] hover:shadow-[0_0_25px_rgba(0,229,255,0.3)] hover:border-cyan-400 transition-all ease-in-out cursor-pointer"
@@ -1106,9 +1114,6 @@ export default function Landing() {
             </div>
           </div>
 
-          <div className="text-center overflow-visible mt-6">
-            <AuraTextEffect />
-          </div>
         </div>
       </div>
 
