@@ -544,260 +544,301 @@ function WebGLImageReveal({ src, title, description, badge }) {
   );
 }
 
-/* ── INTERACTIVE GLASS TEXT EFFECT (AURA HERO) ─────────────────────────── */
+/* ── INTERACTIVE GLASS TEXT EFFECT (AURA HERO) — PREMIUM REWRITE ─────────── */
 function AuraTextEffect() {
   const [isHovered, setIsHovered] = useState(false);
   const canvasRef = useRef(null);
+  const offRef   = useRef(null);   // off-screen canvas for compositing
+  const hoverRef = useRef(false);
+  const rafRef   = useRef(null);
   const containerRef = useRef(null);
+
+  // Keep hoverRef in sync without triggering re-renders inside rAF
+  useEffect(() => { hoverRef.current = isHovered; }, [isHovered]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    
-    let animationFrameId;
-    let particles = [];
-    
-    const resizeCanvas = () => {
+
+    // Off-screen canvas used for glow-shadow compositing
+    const off = document.createElement('canvas');
+    offRef.current = off;
+
+    /* ── RESIZE ─────────────────────────────────────────── */
+    const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
+      const dpr  = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width  = rect.width  * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width  = rect.width  + 'px';
+      canvas.style.height = rect.height + 'px';
+      ctx.scale(dpr, dpr);
+      off.width  = rect.width;
+      off.height = rect.height;
     };
-    
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
-    
-    // Prismatic particle dust class
-    class Particle {
-      constructor(canvasWidth, canvasHeight) {
-        this.x = Math.random() * canvasWidth;
-        this.y = canvasHeight * 0.45 + Math.random() * (canvasHeight * 0.25);
-        this.vx = (Math.random() - 0.5) * 0.35;
-        this.vy = -(0.25 + Math.random() * 0.65);
-        this.size = Math.random() * 1.3 + 0.4;
-        this.alpha = Math.random() * 0.5 + 0.15;
-        this.decay = 0.004 + Math.random() * 0.008;
-        
-        const colors = [
-          'rgba(0, 240, 255, ',  // Cyan
-          'rgba(226, 75, 74, ',  // Magenta
-          'rgba(63, 185, 80, ',  // Emerald Green
-          'rgba(147, 51, 234, '  // Deep Purple
-        ];
-        this.colorBase = colors[Math.floor(Math.random() * colors.length)];
+    resize();
+    window.addEventListener('resize', resize);
+
+    /* ── FONT METRICS ────────────────────────────────────── */
+    const getMetrics = () => {
+      const W = canvas.width  / (Math.min(window.devicePixelRatio || 1, 2));
+      const H = canvas.height / (Math.min(window.devicePixelRatio || 1, 2));
+      const fs = Math.round(W * 0.235);           // ~23.5% of width → big letters
+      return { W, H, fs };
+    };
+
+    /* ── PARTICLE SYSTEM ─────────────────────────────────── */
+    const PRISMATIC = [
+      [0,   240, 255],   // cyan
+      [226,  75,  74],   // magenta / red
+      [ 63, 185,  80],   // emerald green
+      [147,  51, 234],   // deep violet
+      [255, 200,  50],   // warm gold flare
+    ];
+
+    class Mote {
+      constructor(W, H) {
+        // Spawn anywhere across the full text band (vertical center ±30%)
+        this.x   = W * 0.05 + Math.random() * W * 0.90;
+        this.y   = H * 0.3  + Math.random() * H * 0.45;
+        this.vx  = (Math.random() - 0.5) * 0.5;
+        this.vy  = -(0.3 + Math.random() * 0.9);
+        this.r   = 0.6 + Math.random() * 1.8;
+        this.a   = 0.12 + Math.random() * 0.55;
+        this.dec = 0.003 + Math.random() * 0.009;
+        const c  = PRISMATIC[Math.floor(Math.random() * PRISMATIC.length)];
+        this.rgb = `${c[0]},${c[1]},${c[2]}`;
       }
-      
-      update(speedMultiplier) {
-        this.x += this.vx * speedMultiplier;
-        this.y += this.vy * speedMultiplier;
-        this.alpha -= this.decay * speedMultiplier;
+      tick(spd) {
+        this.x  += this.vx * spd;
+        this.y  += this.vy * spd;
+        this.a  -= this.dec * spd;
       }
-      
       draw(ctx) {
-        ctx.fillStyle = `${this.colorBase}${this.alpha})`;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${this.rgb},${Math.max(0, this.a)})`;
         ctx.fill();
       }
     }
-    
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      const speedMultiplier = isHovered ? 1.6 : 0.9;
-      const spawnChance = isHovered ? 0.45 : 0.12;
-      
-      if (Math.random() < spawnChance) {
-        particles.push(new Particle(canvas.width, canvas.height));
+
+    let motes = [];
+
+    /* ── ANIMATION STATE ─────────────────────────────────── */
+    let t     = 0;          // global time in seconds
+    let lerpH = 0;          // smooth hover 0→1
+    let last  = performance.now();
+
+    /* ── DRAW PASS ───────────────────────────────────────── */
+    const draw = (now) => {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      t   += dt;
+
+      const { W, H, fs } = getMetrics();
+      lerpH = lerpH + ((hoverRef.current ? 1 : 0) - lerpH) * 0.07;
+
+      ctx.clearRect(0, 0, W, H);
+
+      /* ── Font string (shared) ── */
+      const FONT = `bold ${fs}px 'Inter', 'Outfit', 'Arial', sans-serif`;
+      const cx   = W / 2;
+      const cy   = H / 2 + fs * 0.08;   // slight downward nudge
+
+      /* ── 1. DEEP GREEN LIGHT SHADOW (background glow pool) ── */
+      const shadowBlur = 55 + lerpH * 30;
+      ctx.save();
+      ctx.filter    = `blur(${shadowBlur}px)`;
+      ctx.globalAlpha = 0.55 + lerpH * 0.3;
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle   = '#013a1e';
+      ctx.fillText('AURA', cx, cy + 14);
+      ctx.restore();
+
+      /* ── 2. SECONDARY GLOW (teal halo) ── */
+      ctx.save();
+      ctx.filter      = `blur(${18 + lerpH * 12}px)`;
+      ctx.globalAlpha = 0.28 + lerpH * 0.22;
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle   = '#00c9a7';
+      ctx.fillText('AURA', cx, cy + 4);
+      ctx.restore();
+
+      /* ── 3. CHROMATIC ABERRATION ── */
+      const aberration = (2.8 + lerpH * 4.2);   // px spread
+
+      // MAGENTA left-shifted
+      ctx.save();
+      ctx.globalAlpha = 0.60 + lerpH * 0.35;
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      const mgGrad = ctx.createLinearGradient(cx - W * 0.4, 0, cx + W * 0.4, 0);
+      mgGrad.addColorStop(0,   'rgba(236, 72, 153, 0.95)');
+      mgGrad.addColorStop(0.5, 'rgba(168, 85, 247, 0.6)');
+      mgGrad.addColorStop(1,   'rgba(59, 130, 246, 0.1)');
+      ctx.fillStyle = mgGrad;
+      ctx.fillText('AURA', cx - aberration, cy - 0.8);
+      ctx.restore();
+
+      // CYAN right-shifted
+      ctx.save();
+      ctx.globalAlpha = 0.60 + lerpH * 0.35;
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      const cyGrad = ctx.createLinearGradient(cx - W * 0.4, 0, cx + W * 0.4, 0);
+      cyGrad.addColorStop(0,   'rgba(0, 240, 255, 0.1)');
+      cyGrad.addColorStop(0.5, 'rgba(0, 200, 255, 0.7)');
+      cyGrad.addColorStop(1,   'rgba(99, 102, 241, 0.9)');
+      ctx.fillStyle = cyGrad;
+      ctx.fillText('AURA', cx + aberration, cy + 0.8);
+      ctx.restore();
+
+      // DEEP BLUE bottom-shifted (third aberration axis)
+      ctx.save();
+      ctx.globalAlpha = 0.30 + lerpH * 0.20;
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle   = 'rgba(30, 60, 220, 0.6)';
+      ctx.fillText('AURA', cx + aberration * 0.5, cy + aberration * 0.7);
+      ctx.restore();
+
+      /* ── 4. CORE EMERALD-TO-TEAL GRADIENT (internal pulse) ── */
+      const pulseSpeed = 0.5 + lerpH * 1.4;
+      const pulse      = Math.sin(t * pulseSpeed) * 0.5 + 0.5;   // 0→1
+
+      // animated gradient stops mimic internal light ripple
+      const g0r = Math.round(5   + pulse * 10);
+      const g0g = Math.round(150 + pulse * 30);
+      const g0b = Math.round(105 + pulse * 60);
+
+      const g1r = Math.round(13  + pulse * 40);
+      const g1g = Math.round(148 + pulse * 10);
+      const g1b = Math.round(136 + pulse * 80);
+
+      const g2r = Math.round(8   + pulse * 80);
+      const g2g = Math.round(145 + pulse * 20);
+      const g2b = Math.round(178 + pulse * 30);
+
+      const coreGrad = ctx.createLinearGradient(
+        cx - W * 0.38, cy - fs * 0.5,
+        cx + W * 0.38, cy + fs * 0.5
+      );
+      coreGrad.addColorStop(0,    `rgb(${g0r},${g0g},${g0b})`);
+      coreGrad.addColorStop(0.42, `rgb(${g1r},${g1g},${g1b})`);
+      coreGrad.addColorStop(0.72 + pulse * 0.08, `rgba(80,220,210,${0.7 + pulse*0.2})`);
+      coreGrad.addColorStop(1,    `rgb(${g2r},${g2g},${g2b})`);
+
+      ctx.save();
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle   = coreGrad;
+      ctx.fillText('AURA', cx, cy);
+      ctx.restore();
+
+      /* ── 5. FACETED MINERAL TEXTURE OVERLAY ── */
+      // Draw a clipping mask of the text, then stroke a diamond grid inside it
+      ctx.save();
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      // Re-use text as a clip region
+      ctx.globalCompositeOperation = 'source-atop';
+
+      // Draw facet lines tiled across the text area
+      const facetSize = fs * 0.22;
+      ctx.strokeStyle = `rgba(255,255,255,${0.06 + pulse * 0.04})`;
+      ctx.lineWidth   = 0.7;
+      ctx.beginPath();
+      for (let fx = cx - W * 0.45; fx < cx + W * 0.45; fx += facetSize) {
+        for (let fy = cy - fs * 0.65; fy < cy + fs * 0.65; fy += facetSize) {
+          const hf = facetSize / 2;
+          ctx.moveTo(fx,      fy);
+          ctx.lineTo(fx + hf, fy + hf);
+          ctx.lineTo(fx + facetSize, fy);
+          ctx.moveTo(fx,      fy);
+          ctx.lineTo(fx + hf, fy - hf * 0.5);
+        }
       }
-      
-      particles = particles.filter(p => p.alpha > 0);
-      
-      particles.forEach(p => {
-        p.update(speedMultiplier);
-        p.draw(ctx);
-      });
-      
-      animationFrameId = requestAnimationFrame(animate);
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+
+      /* ── 6. SPECULAR HIGHLIGHT / BEVEL EDGE ── */
+      // Thin bright top-edge highlight — simulate bevelled glass edge
+      ctx.save();
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeStyle = `rgba(255,255,255,${0.35 + lerpH * 0.35})`;
+      ctx.lineWidth   = 1.2 + lerpH * 0.8;
+      ctx.globalCompositeOperation = 'screen';
+      ctx.strokeText('AURA', cx, cy);
+      ctx.restore();
+
+      // Intense teal outline edge
+      ctx.save();
+      ctx.font        = FONT;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeStyle = `rgba(0,${Math.round(200 + pulse * 55)},255,${0.45 + lerpH * 0.45})`;
+      ctx.lineWidth   = 2.2 + lerpH * 1.8;
+      ctx.globalCompositeOperation = 'screen';
+      ctx.strokeText('AURA', cx + aberration * 0.15, cy - 0.4);
+      ctx.restore();
+
+      /* ── 7. PRISMATIC DUST MOTES ── */
+      const spd   = 0.9 + lerpH * 0.7;
+      const spawn = hoverRef.current ? 0.50 : 0.14;
+      if (Math.random() < spawn) motes.push(new Mote(W, H));
+      motes = motes.filter(m => m.a > 0);
+      motes.forEach(m => { m.tick(spd); m.draw(ctx); });
+
+      rafRef.current = requestAnimationFrame(draw);
     };
-    
-    animate();
-    
+
+    rafRef.current = requestAnimationFrame(draw);
+
     return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', resizeCanvas);
+      cancelAnimationFrame(rafRef.current);
+      window.removeEventListener('resize', resize);
     };
-  }, [isHovered]);
+  }, []);   // single mount — hoverRef keeps state live
 
   return (
-    <div 
+    <div
       ref={containerRef}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className="relative w-full max-w-5xl mx-auto flex items-center justify-center pointer-events-auto select-none cursor-pointer"
+      className="relative w-full max-w-5xl mx-auto pointer-events-auto select-none cursor-pointer"
+      style={{ height: '240px' }}
     >
-      {/* Background radial glow */}
-      <div 
-        className={`absolute inset-x-20 inset-y-8 rounded-full bg-gradient-to-r from-emerald-500/10 via-cyan-500/5 to-purple-500/10 blur-[80px] transition-all duration-700 pointer-events-none ${
-          isHovered ? 'opacity-100 scale-110 blur-[100px]' : 'opacity-60 scale-100'
-        }`} 
+      {/* Deep background prismatic radial glow pool */}
+      <div
+        className={`absolute inset-0 pointer-events-none transition-all duration-700 ${
+          isHovered ? 'opacity-100' : 'opacity-50'
+        }`}
+        style={{
+          background: isHovered
+            ? 'radial-gradient(ellipse 75% 55% at 50% 60%, rgba(6,182,100,0.18) 0%, rgba(6,182,212,0.10) 45%, rgba(99,51,200,0.07) 70%, transparent 100%)'
+            : 'radial-gradient(ellipse 65% 45% at 50% 60%, rgba(6,182,100,0.10) 0%, rgba(6,182,212,0.05) 50%, transparent 100%)',
+        }}
       />
 
-      {/* Particle Canvas on top */}
-      <canvas 
+      {/* Main rendering canvas */}
+      <canvas
         ref={canvasRef}
-        className="absolute inset-0 w-full h-full pointer-events-none z-10"
+        className="absolute inset-0 w-full h-full"
+        style={{ imageRendering: 'pixelated' }}
       />
-
-      {/* SVG Volumetric Glass Text */}
-      <svg 
-        viewBox="0 0 1000 240" 
-        className="w-full h-auto overflow-visible select-none z-0"
-      >
-        <defs>
-          {/* Main Gradient for Emerald-to-Teal with pulse speed */}
-          <linearGradient id="emeraldTealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#059669">
-              <animate 
-                attributeName="stop-color" 
-                values="#059669;#06b6d4;#6366f1;#059669" 
-                dur={isHovered ? "1.8s" : "4.5s"} 
-                repeatCount="indefinite" 
-              />
-            </stop>
-            <stop offset="50%" stopColor="#0d9488">
-              <animate 
-                attributeName="stop-color" 
-                values="#0d9488;#8b5cf6;#059669;#0d9488" 
-                dur={isHovered ? "1.8s" : "4.5s"} 
-                repeatCount="indefinite" 
-              />
-            </stop>
-            <stop offset="100%" stopColor="#0891b2">
-              <animate 
-                attributeName="stop-color" 
-                values="#0891b2;#059669;#0d9488;#0891b2" 
-                dur={isHovered ? "1.8s" : "4.5s"} 
-                repeatCount="indefinite" 
-              />
-            </stop>
-          </linearGradient>
-
-          {/* Prismatic Cyan / Blue Aberration Gradient */}
-          <linearGradient id="prismaticCyan" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#00f0ff" stopOpacity="0.85" />
-            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.15" />
-          </linearGradient>
-
-          {/* Prismatic Magenta / Red Aberration Gradient */}
-          <linearGradient id="prismaticMagenta" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#ec4899" stopOpacity="0.85" />
-            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.15" />
-          </linearGradient>
-
-          {/* Faceted mineral/internal texture pattern */}
-          <pattern id="facetedTexture" width="40" height="40" patternUnits="userSpaceOnUse">
-            <path 
-              d="M 0 0 L 20 10 L 40 0 L 20 20 Z M 20 20 L 40 30 L 20 40 L 0 30 Z" 
-              fill="none" 
-              stroke="rgba(255, 255, 255, 0.07)" 
-              strokeWidth="0.8" 
-            />
-            <path 
-              d="M 20 10 L 20 20 L 40 20 M 0 20 L 20 20 L 20 30" 
-              fill="none" 
-              stroke="rgba(255, 255, 255, 0.03)" 
-              strokeWidth="0.5" 
-            />
-          </pattern>
-
-          {/* Reusable AURA text definition to avoid duplication */}
-          <g id="auraTextContent">
-            <text 
-              x="50%" 
-              y="55%" 
-              textAnchor="middle" 
-              dominantBaseline="middle"
-              className="font-bold uppercase font-sans tracking-[0.04em]"
-              style={{ fontSize: '185px', fontFamily: "'Inter', 'Outfit', sans-serif" }}
-            >
-              AURA
-            </text>
-          </g>
-          
-          {/* Bevel filter for 3D glass effect */}
-          <filter id="bevelFilter" x="-10%" y="-10%" width="120%" height="120%">
-            <feGaussianBlur in="SourceAlpha" stdDeviation="2.5" result="blur" />
-            <feSpecularLighting in="blur" surfaceScale="4.5" specularConstant="1.3" specularExponent="22" lightingColor="#ffffff" result="specular">
-              <feDistantLight azimuth="45" elevation="65" />
-            </feSpecularLighting>
-            <feComposite in="specular" in2="SourceAlpha" operator="in" result="specularOut" />
-            <feComposite in="SourceGraphic" in2="specularOut" operator="over" result="composite" />
-          </filter>
-        </defs>
-
-        {/* ── Layer 1: Soft deep green light shadow ── */}
-        <use 
-          href="#auraTextContent" 
-          fill="#022c22" 
-          filter="blur(12px)" 
-          opacity="0.85" 
-          x="0" 
-          y="10" 
-        />
-
-        {/* ── Layer 2: Prismatic Chromatic Aberration Underlayers ── */}
-        {/* Left offset: magenta split */}
-        <use 
-          href="#auraTextContent" 
-          fill="url(#prismaticMagenta)" 
-          x={isHovered ? "-4.5" : "-2.5"} 
-          y="-0.8" 
-          opacity={isHovered ? "0.95" : "0.65"}
-          className="transition-all duration-300"
-        />
-        {/* Right offset: cyan split */}
-        <use 
-          href="#auraTextContent" 
-          fill="url(#prismaticCyan)" 
-          x={isHovered ? "4.5" : "2.5"} 
-          y="0.8" 
-          opacity={isHovered ? "0.95" : "0.65"}
-          className="transition-all duration-300"
-        />
-
-        {/* ── Layer 3: Substantial Core Emerald-to-Teal Fill ── */}
-        <use 
-          href="#auraTextContent" 
-          fill="url(#emeraldTealGrad)" 
-        />
-
-        {/* ── Layer 4: Faceted mineral/internal texturing ── */}
-        <use 
-          href="#auraTextContent" 
-          fill="url(#facetedTexture)" 
-          style={{ mixBlendMode: 'overlay' }}
-        />
-
-        {/* ── Layer 5: Precise sharp bevel border for glass depth ── */}
-        <use 
-          href="#auraTextContent" 
-          fill="none" 
-          stroke={isHovered ? "rgba(0, 240, 255, 0.7)" : "rgba(6, 182, 212, 0.45)"}
-          strokeWidth="1.6"
-          filter="url(#bevelFilter)"
-          className="transition-all duration-300"
-        />
-
-        {/* ── Layer 6: Bright highlights for volumetric glass edge reflections ── */}
-        <use 
-          href="#auraTextContent" 
-          fill="none" 
-          stroke="rgba(255, 255, 255, 0.4)"
-          strokeWidth="0.8"
-          style={{ mixBlendMode: 'overlay' }}
-        />
-      </svg>
     </div>
   );
 }
