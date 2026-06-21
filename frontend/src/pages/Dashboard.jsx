@@ -530,30 +530,30 @@ function AnimatedCounter({ value, duration = 800, formatter = (val) => val }) {
               </div>
             </div>
           </div>
-
-          {/* ── BOTTOM ROW: Radar + Log Terminal ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Satellite Radar */}
-            <div className="lg:col-span-4">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-aura-textMuted">Orbital Scan Matrix</h3>
-                <span className="text-[8px] text-aura-textMuted font-mono">SYS: SAR_ACTIVE</span>
-              </div>
-              <RadarWidget />
-            </div>
-
-            {/* Decryption Log Terminal */}
-            <div className="lg:col-span-8">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-aura-textMuted">Decrypt Matrix Terminal</h3>
-                <span className="text-[8px] text-aura-textMuted font-mono">HOVER TO PAUSE</span>
-              </div>
-              <LogTerminal />
-            </div>
-          </div>
         </>
-
       ) : null}
+
+      {/* ── BOTTOM ROW: Radar + Log Terminal ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Satellite Radar */}
+        <div className="lg:col-span-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-aura-textMuted">Orbital Scan Matrix</h3>
+            <span className="text-[8px] text-aura-textMuted font-mono">SYS: SAR_ACTIVE</span>
+          </div>
+          <RadarWidget />
+        </div>
+
+        {/* Decryption Log Terminal */}
+        <div className="lg:col-span-8">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-aura-textMuted">Decrypt Matrix Terminal</h3>
+            <span className="text-[8px] text-aura-textMuted font-mono">HOVER TO PAUSE</span>
+          </div>
+          <LogTerminal />
+        </div>
+      </div>
+
 
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#10141D] border border-aura-accent/50 text-white font-mono text-[11px] p-4 shadow-2xl rounded-none flex items-center gap-3 animate-toast">
