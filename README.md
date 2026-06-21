@@ -63,12 +63,12 @@ graph TD
     
     State -->|Fetch API Call| Backend[FastAPI Serverless / Vercel API]
     
-    subgraph Data Seeding & Storage
+    subgraph Data Seeding and Storage
         Backend -->|Auto-Seed/Load| Store[In-Memory Dataset Store]
         Store -->|State Managed| DefaultDS[(Seeded ds_001 dataset)]
     end
     
-    subgraph Detection Pipeline (engine/)
+    subgraph Detection Pipeline
         Store -->|Raw Transactions| Features[Feature Engineering - 17 features]
         Features -->|Account Vector| ML[Supervised Random Forest / IsolationForest Anomaly Score]
         Features -->|NetworkX Digraph| Patterns[Graph Pattern Engine - 5 topologies]
