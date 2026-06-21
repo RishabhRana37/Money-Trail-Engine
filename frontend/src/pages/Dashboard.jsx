@@ -4,7 +4,152 @@ import { api } from '../api';
 import RiskBadge from '../components/RiskBadge';
 import { fakeAccountsList } from '../fixtures';
 
+/* ── SIMULATED LIVE SATELLITE RADAR ─────────────────────────────────────── */
+const RADAR_TARGETS = [
+  { id: 1, cx: 38, cy: 28, color: '#E24B4A', delay: '0s',   label: 'TGT-A01' },
+  { id: 2, cx: 68, cy: 55, color: '#00E5FF', delay: '1.0s', label: 'TGT-B03' },
+  { id: 3, cx: 28, cy: 65, color: '#3FB950', delay: '2.2s', label: 'TGT-C07' },
+  { id: 4, cx: 72, cy: 30, color: '#F0883E', delay: '3.1s', label: 'TGT-D12' },
+];
+
+function RadarWidget() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="hud-panel bg-black/60 p-4 flex flex-col gap-3 h-full" style={{ minHeight: '240px' }}>
+      <div className="flex items-center justify-between">
+        <span className="log-label text-[10px] font-mono font-bold uppercase tracking-widest text-aura-textMuted">// ORBITAL_SCAN</span>
+        <span className="text-[8px] font-mono text-aura-accent animate-pulse">● LIVE</span>
+      </div>
+
+      {/* Radar circle */}
+      <div className="flex-1 flex items-center justify-center">
+        <div className="relative w-44 h-44 radar-sweep-effect rounded-full border border-aura-accent/25 bg-black/70 overflow-hidden flex items-center justify-center">
+          {/* SVG rings + cross-hairs */}
+          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100">
+            <defs>
+              <radialGradient id="radarBg" cx="50%" cy="50%" r="50%">
+                <stop offset="0%"  stopColor="#00E5FF" stopOpacity="0.03" />
+                <stop offset="100%" stopColor="#000"   stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <circle cx="50" cy="50" r="49" fill="url(#radarBg)" />
+            <circle cx="50" cy="50" r="36" fill="none" stroke="#00E5FF" strokeOpacity="0.12" strokeWidth="0.5" />
+            <circle cx="50" cy="50" r="22" fill="none" stroke="#00E5FF" strokeOpacity="0.08" strokeWidth="0.5" />
+            <circle cx="50" cy="50" r="9"  fill="none" stroke="#00E5FF" strokeOpacity="0.12" strokeWidth="0.5" />
+            {/* Cross-hair lines */}
+            <line x1="50" y1="1" x2="50" y2="99" stroke="#00E5FF" strokeOpacity="0.08" strokeWidth="0.4" />
+            <line x1="1" y1="50" x2="99" y2="50" stroke="#00E5FF" strokeOpacity="0.08" strokeWidth="0.4" />
+            {/* Target dots */}
+            {RADAR_TARGETS.map(t => (
+              <g key={t.id}>
+                <rect
+                  x={t.cx - 1.8} y={t.cy - 1.8}
+                  width="3.6" height="3.6"
+                  fill={t.color}
+                  className="radar-dot"
+                  style={{ '--dot-delay': t.delay, color: t.color }}
+                />
+                <text x={t.cx + 3} y={t.cy + 1} fontSize="4" fill={t.color} opacity="0.55" fontFamily="monospace">{t.label}</text>
+              </g>
+            ))}
+            {/* Center pip */}
+            <rect x="48.5" y="48.5" width="3" height="3" fill="#00E5FF" opacity="0.9" />
+          </svg>
+        </div>
+      </div>
+
+      {/* Status readout */}
+      <div className="grid grid-cols-2 gap-x-4 text-[8px] font-mono text-aura-textMuted border-t border-aura-border/40 pt-2">
+        <span>SWEEP: <span className="text-aura-accent">4.00s/REV</span></span>
+        <span>TARGETS: <span className="text-[#E24B4A]">4 LOCKED</span></span>
+        <span>MODE: <span className="text-white">ACTIVE_SAR</span></span>
+        <span>RANGE: <span className="text-white">450NM</span></span>
+      </div>
+    </div>
+  );
+}
+
+/* ── LOG DECRYPTION MATRIX TERMINAL ─────────────────────────────────────── */
+const HEX_CHARS = '0123456789ABCDEF';
+function rndHex(n) {
+  let s = '';
+  for (let i = 0; i < n; i++) s += HEX_CHARS[Math.floor(Math.random() * 16)];
+  return s;
+}
+const LOG_TEMPLATES = [
+  () => `0x${rndHex(4)}${rndHex(4)}... DECRYPT_OK`,
+  () => `DECRYPTING NODE VECTOR_${rndHex(2)}...`,
+  () => `HASH_VERIFY: ${rndHex(8)} [PASS]`,
+  () => `PKT_INTERCEPT → ${rndHex(3)}.${rndHex(3)}.${rndHex(3)}.${rndHex(3)}`,
+  () => `AUTH_TOKEN 0x${rndHex(6)} ACCEPTED`,
+  () => `ROUTE_TRACE [${rndHex(4)}] SUCCESS`,
+  () => `KEY_EXCHANGE: ${rndHex(4)}-${rndHex(4)} OK`,
+  () => `ANOMALY FLAG: acct_${rndHex(4)} SCORE=${Math.floor(Math.random()*55+45)}`,
+  () => `LAYER_STRIP: txn_${rndHex(6)} → CLEAR`,
+  () => `CIPHER_BLOCK ${rndHex(8)} RESOLVED`,
+];
+
+function LogTerminal() {
+  const [lines, setLines] = useState(() =>
+    Array.from({ length: 28 }, () => LOG_TEMPLATES[Math.floor(Math.random() * LOG_TEMPLATES.length)]())
+  );
+  const [hovered, setHovered] = useState(false);
+
+  useEffect(() => {
+    if (hovered) return;  // pause generation on hover
+    const id = setInterval(() => {
+      const newLine = LOG_TEMPLATES[Math.floor(Math.random() * LOG_TEMPLATES.length)]();
+      setLines(prev => [newLine, ...prev.slice(0, 55)]);
+    }, 150);
+    return () => clearInterval(id);
+  }, [hovered]);
+
+  // duplicate list for seamless scroll loop
+  const displayLines = [...lines, ...lines];
+
+  return (
+    <div
+      className="log-terminal hud-panel bg-black/70 p-4 flex flex-col gap-2 overflow-hidden h-full"
+      style={{ minHeight: '240px', borderColor: 'rgba(0,229,255,0.22)' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between flex-shrink-0">
+        <span className="log-label text-[10px] font-mono font-bold uppercase tracking-widest text-aura-textMuted transition-all duration-200">// DECRYPT_MATRIX</span>
+        <div className="flex items-center gap-2">
+          {hovered && <span className="text-[8px] font-mono text-emerald-400 animate-pulse">● PAUSED</span>}
+          {!hovered && <span className="text-[8px] font-mono text-aura-accent animate-pulse">● LIVE_STREAM</span>}
+        </div>
+      </div>
+
+      {/* Scrolling log window */}
+      <div className="flex-1 overflow-hidden relative" style={{ maskImage: 'linear-gradient(to bottom, transparent 0%, black 8%, black 90%, transparent 100%)' }}>
+        <div className={`log-scroll-inner${hovered ? ' paused' : ''} font-mono text-[9px] leading-5 space-y-0.5`}>
+          {displayLines.map((line, i) => {
+            const isSuccess = line.includes('OK') || line.includes('PASS') || line.includes('ACCEPTED') || line.includes('SUCCESS') || line.includes('CLEAR') || line.includes('RESOLVED');
+            const isWarn    = line.includes('ANOMALY') || line.includes('INTERCEPT');
+            const color     = isWarn ? 'text-[#F0883E]' : isSuccess ? 'text-emerald-400' : 'text-aura-accent/75';
+            return (
+              <div key={i} className={`flex gap-2 ${color}`}>
+                <span className="text-aura-textMuted flex-shrink-0 opacity-40">{String(i % lines.length).padStart(3,'0')}</span>
+                <span className="truncate">{line}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard({ datasetId, onDatasetGenerated }) {
+
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [alerts, setAlerts] = useState([]);
@@ -385,7 +530,29 @@ function AnimatedCounter({ value, duration = 800, formatter = (val) => val }) {
               </div>
             </div>
           </div>
+
+          {/* ── BOTTOM ROW: Radar + Log Terminal ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Satellite Radar */}
+            <div className="lg:col-span-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-aura-textMuted">Orbital Scan Matrix</h3>
+                <span className="text-[8px] text-aura-textMuted font-mono">SYS: SAR_ACTIVE</span>
+              </div>
+              <RadarWidget />
+            </div>
+
+            {/* Decryption Log Terminal */}
+            <div className="lg:col-span-8">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-aura-textMuted">Decrypt Matrix Terminal</h3>
+                <span className="text-[8px] text-aura-textMuted font-mono">HOVER TO PAUSE</span>
+              </div>
+              <LogTerminal />
+            </div>
+          </div>
         </>
+
       ) : null}
 
       {toastMessage && (

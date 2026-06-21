@@ -297,3 +297,42 @@ html.lenis, html.lenis body {
 .glow-text-critical {
   text-shadow: 0 0 40px rgba(226, 75, 74, 0.45);
 }
+
+/* ── RADAR WIDGET: target dot sweep-sync fade ── */
+@keyframes dot-sweep-fade {
+  0%   { opacity: 0.08; box-shadow: none; }
+  45%  { opacity: 0.08; box-shadow: none; }
+  50%  { opacity: 1;    box-shadow: 0 0 8px 3px currentColor; }
+  65%  { opacity: 0.55; box-shadow: 0 0 4px 1px currentColor; }
+  100% { opacity: 0.08; box-shadow: none; }
+}
+.radar-dot {
+  animation: dot-sweep-fade 4s linear infinite;
+  animation-delay: var(--dot-delay, 0s);
+  border-radius: 0;
+}
+
+/* ── LOG TERMINAL: continuous upward scroll ── */
+@keyframes log-scroll {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(-50%); }
+}
+.log-scroll-inner {
+  animation: log-scroll 18s linear infinite;
+}
+.log-scroll-inner.paused {
+  animation-play-state: paused;
+}
+
+/* ── LOG TERMINAL: hover glow border ── */
+.log-terminal {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.log-terminal:hover {
+  border-color: rgba(52, 211, 153, 0.60) !important;
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.22), inset 0 0 20px rgba(52, 211, 153, 0.05);
+}
+.log-terminal:hover .log-label {
+  color: #34d399 !important;
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.8);
+}
