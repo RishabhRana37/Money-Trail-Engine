@@ -544,6 +544,264 @@ function WebGLImageReveal({ src, title, description, badge }) {
   );
 }
 
+/* ── INTERACTIVE GLASS TEXT EFFECT (AURA HERO) ─────────────────────────── */
+function AuraTextEffect() {
+  const [isHovered, setIsHovered] = useState(false);
+  const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    let animationFrameId;
+    let particles = [];
+    
+    const resizeCanvas = () => {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    };
+    
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    // Prismatic particle dust class
+    class Particle {
+      constructor(canvasWidth, canvasHeight) {
+        this.x = Math.random() * canvasWidth;
+        this.y = canvasHeight * 0.45 + Math.random() * (canvasHeight * 0.25);
+        this.vx = (Math.random() - 0.5) * 0.35;
+        this.vy = -(0.25 + Math.random() * 0.65);
+        this.size = Math.random() * 1.3 + 0.4;
+        this.alpha = Math.random() * 0.5 + 0.15;
+        this.decay = 0.004 + Math.random() * 0.008;
+        
+        const colors = [
+          'rgba(0, 240, 255, ',  // Cyan
+          'rgba(226, 75, 74, ',  // Magenta
+          'rgba(63, 185, 80, ',  // Emerald Green
+          'rgba(147, 51, 234, '  // Deep Purple
+        ];
+        this.colorBase = colors[Math.floor(Math.random() * colors.length)];
+      }
+      
+      update(speedMultiplier) {
+        this.x += this.vx * speedMultiplier;
+        this.y += this.vy * speedMultiplier;
+        this.alpha -= this.decay * speedMultiplier;
+      }
+      
+      draw(ctx) {
+        ctx.fillStyle = `${this.colorBase}${this.alpha})`;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      const speedMultiplier = isHovered ? 1.6 : 0.9;
+      const spawnChance = isHovered ? 0.45 : 0.12;
+      
+      if (Math.random() < spawnChance) {
+        particles.push(new Particle(canvas.width, canvas.height));
+      }
+      
+      particles = particles.filter(p => p.alpha > 0);
+      
+      particles.forEach(p => {
+        p.update(speedMultiplier);
+        p.draw(ctx);
+      });
+      
+      animationFrameId = requestAnimationFrame(animate);
+    };
+    
+    animate();
+    
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('resize', resizeCanvas);
+    };
+  }, [isHovered]);
+
+  return (
+    <div 
+      ref={containerRef}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className="relative w-full max-w-5xl mx-auto flex items-center justify-center pointer-events-auto select-none cursor-pointer"
+    >
+      {/* Background radial glow */}
+      <div 
+        className={`absolute inset-x-20 inset-y-8 rounded-full bg-gradient-to-r from-emerald-500/10 via-cyan-500/5 to-purple-500/10 blur-[80px] transition-all duration-700 pointer-events-none ${
+          isHovered ? 'opacity-100 scale-110 blur-[100px]' : 'opacity-60 scale-100'
+        }`} 
+      />
+
+      {/* Particle Canvas on top */}
+      <canvas 
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full pointer-events-none z-10"
+      />
+
+      {/* SVG Volumetric Glass Text */}
+      <svg 
+        viewBox="0 0 1000 240" 
+        className="w-full h-auto overflow-visible select-none z-0"
+      >
+        <defs>
+          {/* Main Gradient for Emerald-to-Teal with pulse speed */}
+          <linearGradient id="emeraldTealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#059669">
+              <animate 
+                attributeName="stop-color" 
+                values="#059669;#06b6d4;#6366f1;#059669" 
+                dur={isHovered ? "1.8s" : "4.5s"} 
+                repeatCount="indefinite" 
+              />
+            </stop>
+            <stop offset="50%" stopColor="#0d9488">
+              <animate 
+                attributeName="stop-color" 
+                values="#0d9488;#8b5cf6;#059669;#0d9488" 
+                dur={isHovered ? "1.8s" : "4.5s"} 
+                repeatCount="indefinite" 
+              />
+            </stop>
+            <stop offset="100%" stopColor="#0891b2">
+              <animate 
+                attributeName="stop-color" 
+                values="#0891b2;#059669;#0d9488;#0891b2" 
+                dur={isHovered ? "1.8s" : "4.5s"} 
+                repeatCount="indefinite" 
+              />
+            </stop>
+          </linearGradient>
+
+          {/* Prismatic Cyan / Blue Aberration Gradient */}
+          <linearGradient id="prismaticCyan" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#00f0ff" stopOpacity="0.85" />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.15" />
+          </linearGradient>
+
+          {/* Prismatic Magenta / Red Aberration Gradient */}
+          <linearGradient id="prismaticMagenta" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#ec4899" stopOpacity="0.85" />
+            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.15" />
+          </linearGradient>
+
+          {/* Faceted mineral/internal texture pattern */}
+          <pattern id="facetedTexture" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path 
+              d="M 0 0 L 20 10 L 40 0 L 20 20 Z M 20 20 L 40 30 L 20 40 L 0 30 Z" 
+              fill="none" 
+              stroke="rgba(255, 255, 255, 0.07)" 
+              strokeWidth="0.8" 
+            />
+            <path 
+              d="M 20 10 L 20 20 L 40 20 M 0 20 L 20 20 L 20 30" 
+              fill="none" 
+              stroke="rgba(255, 255, 255, 0.03)" 
+              strokeWidth="0.5" 
+            />
+          </pattern>
+
+          {/* Reusable AURA text definition to avoid duplication */}
+          <g id="auraTextContent">
+            <text 
+              x="50%" 
+              y="55%" 
+              textAnchor="middle" 
+              dominantBaseline="middle"
+              className="font-bold uppercase font-sans tracking-[0.04em]"
+              style={{ fontSize: '185px', fontFamily: "'Inter', 'Outfit', sans-serif" }}
+            >
+              AURA
+            </text>
+          </g>
+          
+          {/* Bevel filter for 3D glass effect */}
+          <filter id="bevelFilter" x="-10%" y="-10%" width="120%" height="120%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2.5" result="blur" />
+            <feSpecularLighting in="blur" surfaceScale="4.5" specularConstant="1.3" specularExponent="22" lightingColor="#ffffff" result="specular">
+              <feDistantLight azimuth="45" elevation="65" />
+            </feSpecularLighting>
+            <feComposite in="specular" in2="SourceAlpha" operator="in" result="specularOut" />
+            <feComposite in="SourceGraphic" in2="specularOut" operator="over" result="composite" />
+          </filter>
+        </defs>
+
+        {/* ── Layer 1: Soft deep green light shadow ── */}
+        <use 
+          href="#auraTextContent" 
+          fill="#022c22" 
+          filter="blur(12px)" 
+          opacity="0.85" 
+          x="0" 
+          y="10" 
+        />
+
+        {/* ── Layer 2: Prismatic Chromatic Aberration Underlayers ── */}
+        {/* Left offset: magenta split */}
+        <use 
+          href="#auraTextContent" 
+          fill="url(#prismaticMagenta)" 
+          x={isHovered ? "-4.5" : "-2.5"} 
+          y="-0.8" 
+          opacity={isHovered ? "0.95" : "0.65"}
+          className="transition-all duration-300"
+        />
+        {/* Right offset: cyan split */}
+        <use 
+          href="#auraTextContent" 
+          fill="url(#prismaticCyan)" 
+          x={isHovered ? "4.5" : "2.5"} 
+          y="0.8" 
+          opacity={isHovered ? "0.95" : "0.65"}
+          className="transition-all duration-300"
+        />
+
+        {/* ── Layer 3: Substantial Core Emerald-to-Teal Fill ── */}
+        <use 
+          href="#auraTextContent" 
+          fill="url(#emeraldTealGrad)" 
+        />
+
+        {/* ── Layer 4: Faceted mineral/internal texturing ── */}
+        <use 
+          href="#auraTextContent" 
+          fill="url(#facetedTexture)" 
+          style={{ mixBlendMode: 'overlay' }}
+        />
+
+        {/* ── Layer 5: Precise sharp bevel border for glass depth ── */}
+        <use 
+          href="#auraTextContent" 
+          fill="none" 
+          stroke={isHovered ? "rgba(0, 240, 255, 0.7)" : "rgba(6, 182, 212, 0.45)"}
+          strokeWidth="1.6"
+          filter="url(#bevelFilter)"
+          className="transition-all duration-300"
+        />
+
+        {/* ── Layer 6: Bright highlights for volumetric glass edge reflections ── */}
+        <use 
+          href="#auraTextContent" 
+          fill="none" 
+          stroke="rgba(255, 255, 255, 0.4)"
+          strokeWidth="0.8"
+          style={{ mixBlendMode: 'overlay' }}
+        />
+      </svg>
+    </div>
+  );
+}
+
 /* ── MAIN LANDING PAGE ──────────────────────────────────────────────────── */
 export default function Landing() {
   const navigate = useNavigate();
@@ -789,10 +1047,8 @@ export default function Landing() {
             </div>
           </div>
 
-          <div className="text-center overflow-hidden">
-            <h1 className="text-[13vw] font-bold text-white/5 tracking-tighter uppercase leading-[0.8] font-sans">
-              AURA
-            </h1>
+          <div className="text-center overflow-visible mt-6">
+            <AuraTextEffect />
           </div>
         </div>
       </div>
