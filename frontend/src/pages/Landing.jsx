@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Lenis from 'lenis';
 import gsap from 'gsap';
@@ -11,7 +11,7 @@ import loginScreenshot from '../assets/login_screenshot.png';
 
 gsap.registerPlugin(ScrollTrigger);
 
-/* ── MOCK DATA FOR TACTICAL TARGETS ─────────────────────────────────────── */
+/* â”€â”€ MOCK DATA FOR TACTICAL TARGETS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const TARGETS_DATA = [
   { id: 'TGT-A01', name: 'OP RADIANT FALCON', type: 'Vessel', lat: 0.26, lon: 1.00, status: 'FIX', risk: 'P1', hash: 'MTS/HCS/SI/TK/OC/NF' },
   { id: 'acc_0042', name: 'Quikfix Traders', type: 'Shell Comp.', lat: 0.50, lon: 1.35, status: 'ENGAGE', risk: 'P1', hash: 'MTS/HCS/SI/TK/OC/NF' },
@@ -21,7 +21,7 @@ const TARGETS_DATA = [
   { id: 'acc_0091', name: 'Maya Holdings', type: 'Business Mule', lat: 0.70, lon: -1.30, status: 'TRACK', risk: 'P2', hash: 'MTS/HCS/SI/TK/OC/NF' },
 ];
 
-/* ── GLSL SHADER SOURCES FOR VOLUMETRIC SPHERE ──────────────────────────── */
+/* â”€â”€ GLSL SHADER SOURCES FOR VOLUMETRIC SPHERE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const sphereVertexShader = `
   uniform float uTime;
   uniform float uScroll;
@@ -79,7 +79,7 @@ const sphereFragmentShader = `
   }
 `;
 
-/* ── WEBGL 3D CANVAS COMPONENT ──────────────────────────────────────────── */
+/* â”€â”€ WEBGL 3D CANVAS COMPONENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function ThreeCanvas({ selectedTarget }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
@@ -356,7 +356,7 @@ function ThreeCanvas({ selectedTarget }) {
   return <div ref={containerRef} className="fixed inset-0 pointer-events-none z-0" />;
 }
 
-/* ── WEBGL DISTORTION IMAGE REVEAL COMPONENT ───────────────────────────── */
+/* â”€â”€ WEBGL DISTORTION IMAGE REVEAL COMPONENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function WebGLImageReveal({ src, title, description, badge }) {
   const canvasContainerRef = useRef(null);
   const [hovered, setHovered] = useState(false);
@@ -537,23 +537,21 @@ function WebGLImageReveal({ src, title, description, badge }) {
         </div>
         <div className="pt-2 flex items-center text-cyan-400 font-mono text-[10px] gap-1 group cursor-pointer font-bold">
           <span>DISCOVER PORTAL MODULE</span>
-          <span className="group-hover:translate-x-1 duration-200">➔</span>
+          <span className="group-hover:translate-x-1 duration-200">âž”</span>
         </div>
       </div>
     </div>
   );
 }
 
-/* ── INTERACTIVE GLASS TEXT EFFECT (AURA HERO) — PREMIUM REWRITE ─────────── */
+/* â”€â”€ INTERACTIVE GLASS TEXT EFFECT (AURA HERO) â€” VOLUMETRIC GLASS â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function AuraTextEffect() {
   const [isHovered, setIsHovered] = useState(false);
-  const canvasRef = useRef(null);
-  const offRef   = useRef(null);   // off-screen canvas for compositing
-  const hoverRef = useRef(false);
-  const rafRef   = useRef(null);
+  const canvasRef    = useRef(null);
+  const hoverRef     = useRef(false);
+  const rafRef       = useRef(null);
   const containerRef = useRef(null);
 
-  // Keep hoverRef in sync without triggering re-renders inside rAF
   useEffect(() => { hoverRef.current = isHovered; }, [isHovered]);
 
   useEffect(() => {
@@ -561,11 +559,7 @@ function AuraTextEffect() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    // Off-screen canvas used for glow-shadow compositing
-    const off = document.createElement('canvas');
-    offRef.current = off;
-
-    /* ── RESIZE ─────────────────────────────────────────── */
+    /* â”€â”€ RESIZE (hi-dpi aware) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       const dpr  = Math.min(window.devicePixelRatio || 1, 2);
@@ -574,244 +568,273 @@ function AuraTextEffect() {
       canvas.style.width  = rect.width  + 'px';
       canvas.style.height = rect.height + 'px';
       ctx.scale(dpr, dpr);
-      off.width  = rect.width;
-      off.height = rect.height;
     };
     resize();
     window.addEventListener('resize', resize);
 
-    /* ── FONT METRICS ────────────────────────────────────── */
-    const getMetrics = () => {
-      const W = canvas.width  / (Math.min(window.devicePixelRatio || 1, 2));
-      const H = canvas.height / (Math.min(window.devicePixelRatio || 1, 2));
-      const fs = Math.round(W * 0.235);           // ~23.5% of width → big letters
+    /* â”€â”€ LOGICAL PIXEL METRICS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    const getM = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const W   = canvas.width  / dpr;
+      const H   = canvas.height / dpr;
+      const fs  = Math.min(Math.round(W * 0.215), 195);
       return { W, H, fs };
     };
 
-    /* ── PARTICLE SYSTEM ─────────────────────────────────── */
-    const PRISMATIC = [
-      [0,   240, 255],   // cyan
-      [226,  75,  74],   // magenta / red
-      [ 63, 185,  80],   // emerald green
-      [147,  51, 234],   // deep violet
-      [255, 200,  50],   // warm gold flare
-    ];
-
-    class Mote {
+    /* â”€â”€ SPARKLE CLASS (cross-star points like reference) â”€â”€ */
+    class Sparkle {
       constructor(W, H) {
-        // Spawn anywhere across the full text band (vertical center ±30%)
-        this.x   = W * 0.05 + Math.random() * W * 0.90;
-        this.y   = H * 0.3  + Math.random() * H * 0.45;
+        this.x   = W * 0.04 + Math.random() * W * 0.92;
+        this.y   = H * 0.08 + Math.random() * H * 0.84;
+        this.r   = 0.4 + Math.random() * 2.2;
+        this.a   = 0.25 + Math.random() * 0.75;
+        this.dec = 0.006 + Math.random() * 0.014;
         this.vx  = (Math.random() - 0.5) * 0.5;
-        this.vy  = -(0.3 + Math.random() * 0.9);
-        this.r   = 0.6 + Math.random() * 1.8;
-        this.a   = 0.12 + Math.random() * 0.55;
-        this.dec = 0.003 + Math.random() * 0.009;
-        const c  = PRISMATIC[Math.floor(Math.random() * PRISMATIC.length)];
-        this.rgb = `${c[0]},${c[1]},${c[2]}`;
+        this.vy  = -(0.08 + Math.random() * 0.55);
+        const palette = [
+          '0,240,255', '0,210,180', '80,255,210',
+          '200,255,240', '255,255,255', '160,80,255'
+        ];
+        this.rgb = palette[Math.floor(Math.random() * palette.length)];
       }
       tick(spd) {
-        this.x  += this.vx * spd;
-        this.y  += this.vy * spd;
-        this.a  -= this.dec * spd;
+        this.x += this.vx * spd;
+        this.y += this.vy * spd;
+        this.a -= this.dec * spd;
       }
-      draw(ctx) {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${this.rgb},${Math.max(0, this.a)})`;
-        ctx.fill();
+      draw(c) {
+        if (this.a <= 0) return;
+        const alpha = Math.max(0, this.a);
+        c.save();
+        c.globalAlpha = alpha;
+        c.fillStyle   = `rgba(${this.rgb},1)`;
+        c.beginPath();
+        c.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        c.fill();
+        // Cross-flare for larger sparkles (replicates reference image light points)
+        if (this.r > 1.0) {
+          const arm = this.r * 3.5;
+          c.strokeStyle = `rgba(${this.rgb},${alpha * 0.55})`;
+          c.lineWidth   = 0.6;
+          c.beginPath();
+          c.moveTo(this.x - arm, this.y);  c.lineTo(this.x + arm, this.y);
+          c.moveTo(this.x, this.y - arm);  c.lineTo(this.x, this.y + arm);
+          c.stroke();
+        }
+        c.restore();
       }
     }
 
-    let motes = [];
+    let sparks = [];
+    let t      = 0;
+    let lerpH  = 0;
+    let last   = performance.now();
 
-    /* ── ANIMATION STATE ─────────────────────────────────── */
-    let t     = 0;          // global time in seconds
-    let lerpH = 0;          // smooth hover 0→1
-    let last  = performance.now();
-
-    /* ── DRAW PASS ───────────────────────────────────────── */
-    const draw = (now) => {
+    /* â”€â”€ MAIN RENDER LOOP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    const tick = (now) => {
       const dt = Math.min((now - last) / 1000, 0.05);
-      last = now;
-      t   += dt;
+      last  = now;
+      t    += dt;
+      lerpH = lerpH + ((hoverRef.current ? 1 : 0) - lerpH) * 0.06;
 
-      const { W, H, fs } = getMetrics();
-      lerpH = lerpH + ((hoverRef.current ? 1 : 0) - lerpH) * 0.07;
-
+      const { W, H, fs } = getM();
       ctx.clearRect(0, 0, W, H);
 
-      /* ── Font string (shared) ── */
-      const FONT = `bold ${fs}px 'Inter', 'Outfit', 'Arial', sans-serif`;
-      const cx   = W / 2;
-      const cy   = H / 2 + fs * 0.08;   // slight downward nudge
+      const cx     = W / 2;
+      const cy     = H * 0.55;
+      const FONT   = `900 ${fs}px 'Inter','Outfit','Arial Black',sans-serif`;
+      const pulse  = Math.sin(t * (0.38 + lerpH * 0.9)) * 0.5 + 0.5;   // 0â†’1
+      const pulse2 = Math.sin(t * 0.65 + 1.3) * 0.5 + 0.5;
 
-      /* ── 1. DEEP GREEN LIGHT SHADOW (background glow pool) ── */
-      const shadowBlur = 55 + lerpH * 30;
+      /* â”€â”€ PHASE 1 Â· BACKGROUND ATMOSPHERIC GLOW â”€â”€ */
+      const bgR = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.52);
+      bgR.addColorStop(0, `rgba(0,${Math.round(70+pulse*35)},${Math.round(50+pulse*20)},${0.24+lerpH*0.14})`);
+      bgR.addColorStop(0.5, `rgba(0,25,18,${0.10+lerpH*0.06})`);
+      bgR.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = bgR;
+      ctx.fillRect(0, 0, W, H);
+
+      /* â”€â”€ PHASE 2 Â· 3-D DEPTH LAYERS (thick glass illusion) â”€â”€ */
+      const depthCount = 10;
+      for (let i = depthCount; i >= 1; i--) {
+        const frac = i / depthCount;
+        ctx.save();
+        ctx.font         = FONT;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        // deeper layers are darker; top layer approaches the surface colour
+        ctx.fillStyle  = `rgb(0,${Math.round(frac * 40)},${Math.round(frac * 22)})`;
+        ctx.globalAlpha = 0.82;
+        ctx.fillText('AURA', cx + i * 0.35, cy + i * 1.1);
+        ctx.restore();
+      }
+
+      /* â”€â”€ PHASE 3 Â· CHROMATIC ABERRATION (3 axes) â”€â”€ */
+      const aber = 4.0 + lerpH * 5.8;
+
+      // Magenta / violet  â†’  left-shift
       ctx.save();
-      ctx.filter    = `blur(${shadowBlur}px)`;
-      ctx.globalAlpha = 0.55 + lerpH * 0.3;
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
+      ctx.font         = FONT;
+      ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle   = '#013a1e';
-      ctx.fillText('AURA', cx, cy + 14);
+      ctx.globalAlpha  = 0.62 + lerpH * 0.32;
+      const mgG = ctx.createLinearGradient(0, 0, W, 0);
+      mgG.addColorStop(0,    'rgba(255,20,215,0.95)');
+      mgG.addColorStop(0.35, 'rgba(180,55,255,0.65)');
+      mgG.addColorStop(0.75, 'rgba(60,110,255,0.20)');
+      mgG.addColorStop(1,    'rgba(0,200,255,0.04)');
+      ctx.fillStyle = mgG;
+      ctx.fillText('AURA', cx - aber, cy - 0.9);
       ctx.restore();
 
-      /* ── 2. SECONDARY GLOW (teal halo) ── */
+      // Cyan / indigo  â†’  right-shift
       ctx.save();
-      ctx.filter      = `blur(${18 + lerpH * 12}px)`;
-      ctx.globalAlpha = 0.28 + lerpH * 0.22;
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
+      ctx.font         = FONT;
+      ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle   = '#00c9a7';
-      ctx.fillText('AURA', cx, cy + 4);
+      ctx.globalAlpha  = 0.62 + lerpH * 0.32;
+      const cyG = ctx.createLinearGradient(0, 0, W, 0);
+      cyG.addColorStop(0,    'rgba(0,200,255,0.04)');
+      cyG.addColorStop(0.35, 'rgba(0,225,255,0.40)');
+      cyG.addColorStop(0.72, 'rgba(0,245,255,0.82)');
+      cyG.addColorStop(1,    'rgba(130,75,255,0.90)');
+      ctx.fillStyle = cyG;
+      ctx.fillText('AURA', cx + aber, cy + 0.9);
       ctx.restore();
 
-      /* ── 3. CHROMATIC ABERRATION ── */
-      const aberration = (2.8 + lerpH * 4.2);   // px spread
-
-      // MAGENTA left-shifted
+      // Soft green ghost (diagonal)
       ctx.save();
-      ctx.globalAlpha = 0.60 + lerpH * 0.35;
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
+      ctx.font         = FONT;
+      ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      const mgGrad = ctx.createLinearGradient(cx - W * 0.4, 0, cx + W * 0.4, 0);
-      mgGrad.addColorStop(0,   'rgba(236, 72, 153, 0.95)');
-      mgGrad.addColorStop(0.5, 'rgba(168, 85, 247, 0.6)');
-      mgGrad.addColorStop(1,   'rgba(59, 130, 246, 0.1)');
-      ctx.fillStyle = mgGrad;
-      ctx.fillText('AURA', cx - aberration, cy - 0.8);
+      ctx.globalAlpha  = 0.18 + lerpH * 0.12;
+      ctx.fillStyle    = `rgba(0,255,160,0.55)`;
+      ctx.fillText('AURA', cx + aber * 0.28, cy + aber * 0.48);
       ctx.restore();
 
-      // CYAN right-shifted
-      ctx.save();
-      ctx.globalAlpha = 0.60 + lerpH * 0.35;
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
-      ctx.textBaseline = 'middle';
-      const cyGrad = ctx.createLinearGradient(cx - W * 0.4, 0, cx + W * 0.4, 0);
-      cyGrad.addColorStop(0,   'rgba(0, 240, 255, 0.1)');
-      cyGrad.addColorStop(0.5, 'rgba(0, 200, 255, 0.7)');
-      cyGrad.addColorStop(1,   'rgba(99, 102, 241, 0.9)');
-      ctx.fillStyle = cyGrad;
-      ctx.fillText('AURA', cx + aberration, cy + 0.8);
-      ctx.restore();
+      /* â”€â”€ PHASE 4 Â· CORE GLASS FILL (hsl animated) â”€â”€ */
+      const h0 = 158 + pulse  * 18;   // oscillate between green-teal
+      const h1 = 172 + pulse2 * 12;
+      const h2 = 183 + pulse  *  9;
 
-      // DEEP BLUE bottom-shifted (third aberration axis)
-      ctx.save();
-      ctx.globalAlpha = 0.30 + lerpH * 0.20;
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle   = 'rgba(30, 60, 220, 0.6)';
-      ctx.fillText('AURA', cx + aberration * 0.5, cy + aberration * 0.7);
-      ctx.restore();
-
-      /* ── 4. CORE EMERALD-TO-TEAL GRADIENT (internal pulse) ── */
-      const pulseSpeed = 0.5 + lerpH * 1.4;
-      const pulse      = Math.sin(t * pulseSpeed) * 0.5 + 0.5;   // 0→1
-
-      // animated gradient stops mimic internal light ripple
-      const g0r = Math.round(5   + pulse * 10);
-      const g0g = Math.round(150 + pulse * 30);
-      const g0b = Math.round(105 + pulse * 60);
-
-      const g1r = Math.round(13  + pulse * 40);
-      const g1g = Math.round(148 + pulse * 10);
-      const g1b = Math.round(136 + pulse * 80);
-
-      const g2r = Math.round(8   + pulse * 80);
-      const g2g = Math.round(145 + pulse * 20);
-      const g2b = Math.round(178 + pulse * 30);
-
-      const coreGrad = ctx.createLinearGradient(
-        cx - W * 0.38, cy - fs * 0.5,
-        cx + W * 0.38, cy + fs * 0.5
+      const coreG = ctx.createLinearGradient(
+        cx - W * 0.42, cy - fs * 0.52,
+        cx + W * 0.42, cy + fs * 0.52
       );
-      coreGrad.addColorStop(0,    `rgb(${g0r},${g0g},${g0b})`);
-      coreGrad.addColorStop(0.42, `rgb(${g1r},${g1g},${g1b})`);
-      coreGrad.addColorStop(0.72 + pulse * 0.08, `rgba(80,220,210,${0.7 + pulse*0.2})`);
-      coreGrad.addColorStop(1,    `rgb(${g2r},${g2g},${g2b})`);
+      coreG.addColorStop(0,    `hsl(${h0},90%,${18+pulse*11}%)`);
+      coreG.addColorStop(0.28, `hsl(${h1},88%,${27+pulse2*9}%)`);
+      coreG.addColorStop(0.55, `hsl(${h2},86%,${21+pulse*13}%)`);
+      coreG.addColorStop(0.78, `hsl(${h0+8},90%,${25+pulse2*7}%)`);
+      coreG.addColorStop(1,    `hsl(${h1},87%,${17+pulse*9}%)`);
 
       ctx.save();
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
+      ctx.font         = FONT;
+      ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle   = coreGrad;
+      ctx.fillStyle    = coreG;
       ctx.fillText('AURA', cx, cy);
       ctx.restore();
 
-      /* ── 5. FACETED MINERAL TEXTURE OVERLAY ── */
-      // Draw a clipping mask of the text, then stroke a diamond grid inside it
+      /* â”€â”€ PHASE 5 Â· INTERNAL AURORA/MARBLE TEXTURE (source-atop) â”€â”€ */
       ctx.save();
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
-      ctx.textBaseline = 'middle';
-      // Re-use text as a clip region
       ctx.globalCompositeOperation = 'source-atop';
 
-      // Draw facet lines tiled across the text area
-      const facetSize = fs * 0.22;
-      ctx.strokeStyle = `rgba(255,255,255,${0.06 + pulse * 0.04})`;
-      ctx.lineWidth   = 0.7;
-      ctx.beginPath();
-      for (let fx = cx - W * 0.45; fx < cx + W * 0.45; fx += facetSize) {
-        for (let fy = cy - fs * 0.65; fy < cy + fs * 0.65; fy += facetSize) {
-          const hf = facetSize / 2;
-          ctx.moveTo(fx,      fy);
-          ctx.lineTo(fx + hf, fy + hf);
-          ctx.lineTo(fx + facetSize, fy);
-          ctx.moveTo(fx,      fy);
-          ctx.lineTo(fx + hf, fy - hf * 0.5);
-        }
+      // Animated horizontal wave bands (fluid/aurora look)
+      const bandCount = 9;
+      for (let b = 0; b < bandCount; b++) {
+        const bFrac  = b / (bandCount - 1);
+        const yPos   = cy - fs * 0.52 + bFrac * fs * 1.04;
+        const xOff   = Math.sin(t * 0.45 + b * 0.9) * W * 0.07;
+        const peakA  = (0.055 + pulse * 0.04) * Math.sin(bFrac * Math.PI); // fade at top/bottom
+
+        const wG = ctx.createLinearGradient(
+          cx - W * 0.38 + xOff, yPos,
+          cx + W * 0.38 + xOff, yPos + fs / bandCount + 2
+        );
+        wG.addColorStop(0,    'rgba(0,200,175,0)');
+        wG.addColorStop(0.28, `rgba(0,215,195,${peakA})`);
+        wG.addColorStop(0.55, `rgba(50,255,220,${peakA * 1.6})`);
+        wG.addColorStop(0.78, `rgba(0,200,175,${peakA * 0.65})`);
+        wG.addColorStop(1,    'rgba(0,160,135,0)');
+        ctx.fillStyle = wG;
+        ctx.fillRect(0, yPos, W, fs / bandCount + 3);
       }
-      ctx.stroke();
+
+      // Top specular highlight band (bright glass catching overhead light)
+      const topSpec = ctx.createLinearGradient(cx, cy - fs * 0.52, cx, cy - fs * 0.05);
+      topSpec.addColorStop(0,   `rgba(190,255,235,${0.22 + pulse * 0.12})`);
+      topSpec.addColorStop(0.5, `rgba(140,255,215,${0.08 + pulse2 * 0.06})`);
+      topSpec.addColorStop(1,   'rgba(0,200,175,0)');
+      ctx.fillStyle = topSpec;
+      ctx.fillRect(0, cy - fs * 0.53, W, fs * 0.55);
+
+      // Upper-right bright flare (matches reference image top-right specular bloom)
+      const flX = cx + W * 0.28;
+      const flY = cy - fs * 0.28;
+      const flR = fs * 0.32;
+      const flG = ctx.createRadialGradient(flX, flY, 0, flX, flY, flR);
+      flG.addColorStop(0,   `rgba(220,255,245,${0.55 + lerpH * 0.25 + pulse * 0.18})`);
+      flG.addColorStop(0.25, `rgba(100,255,210,${0.18 + pulse * 0.10})`);
+      flG.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = flG;
+      ctx.fillRect(0, 0, W, H);
+
+      // Secondary flare upper-left
+      const fl2X = cx - W * 0.30;
+      const fl2Y = cy - fs * 0.20;
+      const fl2G = ctx.createRadialGradient(fl2X, fl2Y, 0, fl2X, fl2Y, fs * 0.20);
+      fl2G.addColorStop(0,   `rgba(0,255,200,${0.28 + pulse2 * 0.12})`);
+      fl2G.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = fl2G;
+      ctx.fillRect(0, 0, W, H);
+
       ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
 
-      /* ── 6. SPECULAR HIGHLIGHT / BEVEL EDGE ── */
-      // Thin bright top-edge highlight — simulate bevelled glass edge
+      /* â”€â”€ PHASE 6 Â· BEVEL EDGE SPECULAR STROKES â”€â”€ */
+      // Bright white glass-edge highlight
       ctx.save();
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
+      ctx.font         = FONT;
+      ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      ctx.strokeStyle = `rgba(255,255,255,${0.35 + lerpH * 0.35})`;
-      ctx.lineWidth   = 1.2 + lerpH * 0.8;
+      ctx.strokeStyle  = `rgba(200,255,240,${0.60 + lerpH * 0.35 + pulse * 0.10})`;
+      ctx.lineWidth    = 1.4 + lerpH * 1.1;
       ctx.globalCompositeOperation = 'screen';
       ctx.strokeText('AURA', cx, cy);
       ctx.restore();
 
-      // Intense teal outline edge
+      // Teal edge glow (slightly widened on hover)
       ctx.save();
-      ctx.font        = FONT;
-      ctx.textAlign   = 'center';
+      ctx.font         = FONT;
+      ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      ctx.strokeStyle = `rgba(0,${Math.round(200 + pulse * 55)},255,${0.45 + lerpH * 0.45})`;
-      ctx.lineWidth   = 2.2 + lerpH * 1.8;
+      ctx.strokeStyle  = `rgba(0,${Math.round(215+pulse*40)},195,${0.50+lerpH*0.42})`;
+      ctx.lineWidth    = 3.2 + lerpH * 2.2;
       ctx.globalCompositeOperation = 'screen';
-      ctx.strokeText('AURA', cx + aberration * 0.15, cy - 0.4);
+      ctx.strokeText('AURA', cx + aber * 0.18, cy - 0.5);
       ctx.restore();
 
-      /* ── 7. PRISMATIC DUST MOTES ── */
-      const spd   = 0.9 + lerpH * 0.7;
-      const spawn = hoverRef.current ? 0.50 : 0.14;
-      if (Math.random() < spawn) motes.push(new Mote(W, H));
-      motes = motes.filter(m => m.a > 0);
-      motes.forEach(m => { m.tick(spd); m.draw(ctx); });
+      /* â”€â”€ PHASE 7 Â· SPARKLE PARTICLES (screen-blended) â”€â”€ */
+      const spd   = 0.88 + lerpH * 0.62;
+      const spawn = hoverRef.current ? 0.58 : 0.20;
+      if (Math.random() < spawn) sparks.push(new Sparkle(W, H));
+      sparks = sparks.filter(s => s.a > 0);
 
-      rafRef.current = requestAnimationFrame(draw);
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      sparks.forEach(s => { s.tick(spd); s.draw(ctx); });
+      ctx.restore();
+
+      rafRef.current = requestAnimationFrame(tick);
     };
 
-    rafRef.current = requestAnimationFrame(draw);
+    rafRef.current = requestAnimationFrame(tick);
 
     return () => {
       cancelAnimationFrame(rafRef.current);
       window.removeEventListener('resize', resize);
     };
-  }, []);   // single mount — hoverRef keeps state live
+  }, []); // single mount â€” hoverRef keeps state live without re-mount
 
   return (
     <div
@@ -821,15 +844,15 @@ function AuraTextEffect() {
       className="relative w-full max-w-5xl mx-auto pointer-events-auto select-none cursor-pointer"
       style={{ height: '240px' }}
     >
-      {/* Deep background prismatic radial glow pool */}
+      {/* Background prismatic radial glow pool â€” matches the dark halo in reference */}
       <div
         className={`absolute inset-0 pointer-events-none transition-all duration-700 ${
-          isHovered ? 'opacity-100' : 'opacity-50'
+          isHovered ? 'opacity-100' : 'opacity-55'
         }`}
         style={{
           background: isHovered
-            ? 'radial-gradient(ellipse 75% 55% at 50% 60%, rgba(6,182,100,0.18) 0%, rgba(6,182,212,0.10) 45%, rgba(99,51,200,0.07) 70%, transparent 100%)'
-            : 'radial-gradient(ellipse 65% 45% at 50% 60%, rgba(6,182,100,0.10) 0%, rgba(6,182,212,0.05) 50%, transparent 100%)',
+            ? 'radial-gradient(ellipse 80% 60% at 50% 62%, rgba(0,110,75,0.22) 0%, rgba(0,70,90,0.12) 42%, rgba(55,15,110,0.07) 68%, transparent 100%)'
+            : 'radial-gradient(ellipse 68% 50% at 50% 62%, rgba(0,90,55,0.13) 0%, rgba(0,50,70,0.07) 50%, transparent 100%)',
         }}
       />
 
@@ -837,13 +860,12 @@ function AuraTextEffect() {
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full"
-        style={{ imageRendering: 'pixelated' }}
       />
     </div>
   );
 }
 
-/* ── MAIN LANDING PAGE ──────────────────────────────────────────────────── */
+/* â”€â”€ MAIN LANDING PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export default function Landing() {
   const navigate = useNavigate();
   const [selectedTarget, setSelectedTarget] = useState(TARGETS_DATA[0]);
@@ -956,8 +978,8 @@ export default function Landing() {
       
       const latEl = document.getElementById('hud-lat-angle');
       const lonEl = document.getElementById('hud-lon-angle');
-      if (latEl) latEl.textContent = `LAT_ANGLE: ${(y * 180 - 90).toFixed(2)}°`;
-      if (lonEl) lonEl.textContent = `LON_ANGLE: ${(x * 360 - 180).toFixed(2)}°`;
+      if (latEl) latEl.textContent = `LAT_ANGLE: ${(y * 180 - 90).toFixed(2)}Â°`;
+      if (lonEl) lonEl.textContent = `LON_ANGLE: ${(x * 360 - 180).toFixed(2)}Â°`;
     };
     window.addEventListener('mousemove', handleHUDMouseMove, { passive: true });
 
@@ -1011,7 +1033,7 @@ export default function Landing() {
         selectedTarget={selectedTarget}
       />
 
-      {/* ── STICKY TOP TELEMETRY BAR (Nav) ── */}
+      {/* â”€â”€ STICKY TOP TELEMETRY BAR (Nav) â”€â”€ */}
       <header className="fixed top-0 left-0 w-full z-40 flex items-center justify-between px-8 py-4 border-b border-white/5 bg-black/20 backdrop-blur-md pointer-events-auto">
         <div className="flex items-center gap-3">
           <svg width="22" height="22" viewBox="0 0 401 494" fill="none" className="animate-pulse">
@@ -1024,7 +1046,7 @@ export default function Landing() {
 
         <div className="flex items-center gap-6">
           <span className="font-mono text-[10px] text-cyan-400/50 tracking-wider hidden md:block">
-            // COORDINATE_NODE: {timeStr} Z [DEL: 28.61° N, 77.20° E]
+            // COORDINATE_NODE: {timeStr} Z [DEL: 28.61Â° N, 77.20Â° E]
           </span>
           <div className="flex items-center gap-3">
             <button
@@ -1032,13 +1054,13 @@ export default function Landing() {
               className="p-1.5 text-slate-400 hover:text-white transition-colors"
               title="System Menu"
             >
-              ☰
+              â˜°
             </button>
           </div>
         </div>
       </header>
 
-      {/* ── SCREEN 1: GOTHAM HUD OVERLAY (Fades out on scroll) ── */}
+      {/* â”€â”€ SCREEN 1: GOTHAM HUD OVERLAY (Fades out on scroll) â”€â”€ */}
       <div 
         className="fixed inset-0 z-10 flex flex-col justify-between pt-24 pb-6 pointer-events-none hud-overlay"
         style={{ opacity: 1, visibility: 'visible' }}
@@ -1060,8 +1082,8 @@ export default function Landing() {
           {/* Coordinate Readout overlay */}
           <div className="hidden lg:flex flex-col justify-between items-end p-4 text-right font-mono text-[9px] text-slate-500">
             <div className="space-y-1">
-              <div id="hud-lat-angle">LAT_ANGLE: 0.00°</div>
-              <div id="hud-lon-angle">LON_ANGLE: 0.00°</div>
+              <div id="hud-lat-angle">LAT_ANGLE: 0.00Â°</div>
+              <div id="hud-lon-angle">LON_ANGLE: 0.00Â°</div>
               <div className="text-cyan-400">DEC_RETICLE: LOCKED</div>
             </div>
           </div>
@@ -1084,7 +1106,7 @@ export default function Landing() {
             </div>
             <div>
               <div className="text-slate-600 uppercase tracking-widest mb-0.5">// LICENSED AGENT</div>
-              <div className="text-slate-600">COPYRIGHT © 2026 AURA INTEL CORP.</div>
+              <div className="text-slate-600">COPYRIGHT Â© 2026 AURA INTEL CORP.</div>
             </div>
           </div>
 
@@ -1094,7 +1116,7 @@ export default function Landing() {
         </div>
       </div>
 
-      {/* ── SCREEN 2: SCROLLABLE LANDING INFORMATION VIEW ── */}
+      {/* â”€â”€ SCREEN 2: SCROLLABLE LANDING INFORMATION VIEW â”€â”€ */}
       <div 
         className="relative z-20 w-full pt-[100vh] pb-32 main-content-scroll"
         style={{ opacity: 0, pointerEvents: 'none' }}
@@ -1149,7 +1171,7 @@ export default function Landing() {
             {[
               { val: '200+', label: 'Accounts Logged' },
               { val: '2,500', label: 'Ledger Transfers' },
-              { val: '₹1.28 Cr', label: 'Flagged Capital' },
+              { val: 'â‚¹1.28 Cr', label: 'Flagged Capital' },
               { val: '99.2%', label: 'Trace Accuracy' }
             ].map((stat, i) => (
               <div key={i} className="glass-panel p-8 text-center rounded-xl border border-white/5">
@@ -1168,19 +1190,19 @@ export default function Landing() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="glass-panel p-8 rounded-xl border border-white/5 space-y-4">
-                <div className="text-2xl">🕸️</div>
+                <div className="text-2xl">ðŸ•¸ï¸</div>
                 <h4 className="font-mono text-xs font-bold text-cyan-400 uppercase tracking-wider">// Multi-Hop Path Tracking</h4>
                 <p className="text-xs text-slate-400 leading-relaxed font-light">Trace layering chains and structured transactions across multiple bank nodes instantly, keeping existing layout positions pinned.</p>
               </div>
 
               <div className="glass-panel p-8 rounded-xl border border-white/5 space-y-4">
-                <div className="text-2xl">🧠</div>
+                <div className="text-2xl">ðŸ§ </div>
                 <h4 className="font-mono text-xs font-bold text-cyan-400 uppercase tracking-wider">// Machine Learning Ontology</h4>
                 <p className="text-xs text-slate-400 leading-relaxed font-light">Our neural processing pipeline flags circular, smurfing, fan-in, and rapid pass-through mule profiles automatically.</p>
               </div>
 
               <div className="glass-panel p-8 rounded-xl border border-white/5 space-y-4">
-                <div className="text-2xl">📁</div>
+                <div className="text-2xl">ðŸ“</div>
                 <h4 className="font-mono text-xs font-bold text-cyan-400 uppercase tracking-wider">// Automated Case Dossiers</h4>
                 <p className="text-xs text-slate-400 leading-relaxed font-light">Generate comprehensive intelligence slates with 'Why flagged?' contribution charts, inflow/outflow metrics, and timestamp timelines.</p>
               </div>
@@ -1189,7 +1211,7 @@ export default function Landing() {
 
           {/* 5. GOTHAM QUOTE BLOCK */}
           <div className="glass-panel p-10 max-w-4xl mx-auto text-center rounded-xl border border-white/5 space-y-4">
-            <span className="text-4xl text-cyan-400/20 font-serif block">“</span>
+            <span className="text-4xl text-cyan-400/20 font-serif block">â€œ</span>
             <p className="text-lg text-slate-300 font-light italic leading-relaxed max-w-2xl mx-auto">
               AURA allows compliance divisions to visualise complex money flows instantly, reducing typical case triage times from days to a few simple clicks.
             </p>
@@ -1218,7 +1240,7 @@ export default function Landing() {
 
           {/* 7. MINIMALIST SYSTEM FOOTER */}
           <footer className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/5 pt-8 font-mono text-[9px] text-slate-600">
-            <span>© 2026 AURA FINANCIAL INTELLIGENCE GROUP · SYSTEM ACCESS CLASSIFIED</span>
+            <span>Â© 2026 AURA FINANCIAL INTELLIGENCE GROUP Â· SYSTEM ACCESS CLASSIFIED</span>
             <span>DATA TRANSIT INTEGRITY: AES-256 CONTEXT</span>
           </footer>
 
