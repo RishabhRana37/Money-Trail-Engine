@@ -1,182 +1,323 @@
+"""
+engine/features.py
+==================
+Builds one feature row per account from the raw edges DataFrame.
+These features are the input to IsolationForest (unsupervised anomaly
+detection) and any supervised classifier trained on ground-truth labels.
+
+Thresholds for "structuring" and "round amount" are computed
+AUTOMATICALLY from the dataset's own amount distribution, so the
+feature engineering adapts correctly whether amounts are in the
+hundreds (login/session datasets) or hundreds-of-thousands (PaySim /
+bank-transfer datasets).
+
+Public API:
+    build_account_features(edges_df) -> (feat_df, ML_FEATURES)
+"""
+
+import math
 import pandas as pd
 import numpy as np
-import networkx as nx
-from datetime import datetime
-from typing import Dict, List, Any
 
-def compute_features(accounts: Dict[str, Dict[str, Any]], transactions: List[Dict[str, Any]]) -> pd.DataFrame:
-    # Initialize feature dict for each account
-    feature_dict = {}
-    for acc_id in accounts.keys():
-        feature_dict[acc_id] = {
-            "account_id": acc_id,
-            "total_in": 0.0,
-            "total_out": 0.0,
-            "txn_count": 0,
-            "fan_in_set": set(),
-            "fan_out_set": set(),
-            "in_txns": [],
-            "out_txns": [],
-            "structuring_count": 0,
-            "round_amount_count": 0,
-            "locations": set(),
-            "devices": set(),
-            "ips": set()
-        }
-        
-    # Map IP to accounts
-    ip_to_accounts = {}
-        
-    # Process transactions to populate basic counters
-    for txn in transactions:
-        from_acc = txn["from_account"]
-        to_acc = txn["to_account"]
-        amount = float(txn["amount"])
-        
-        # Parse timestamp
-        try:
-            ts = datetime.strptime(txn["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
-        except ValueError:
-            ts = datetime.fromisoformat(txn["timestamp"].replace("Z", "+00:00"))
-            
-        # Structuring check (just under 50,000 threshold, e.g. [45000, 49999.99])
-        is_structured = 45000.0 <= amount < 50000.0
-        
-        # Round amount check (multiple of 5000 or 10000)
-        is_round = (amount % 5000 == 0) or (amount % 10000 == 0)
-        
-        # Track IP sharing
-        ip = txn.get("ip_address")
-        if ip:
-            if ip not in ip_to_accounts:
-                ip_to_accounts[ip] = set()
-            ip_to_accounts[ip].add(from_acc)
-            ip_to_accounts[ip].add(to_acc)
-            
-        if from_acc in feature_dict:
-            f = feature_dict[from_acc]
-            f["total_out"] += amount
-            f["txn_count"] += 1
-            f["fan_out_set"].add(to_acc)
-            f["out_txns"].append((ts, amount))
-            if is_structured:
-                f["structuring_count"] += 1
-            if is_round:
-                f["round_amount_count"] += 1
-            if "location" in txn and txn["location"]:
-                f["locations"].add(txn["location"])
-            if "device_used" in txn and txn["device_used"]:
-                f["devices"].add(txn["device_used"])
-            if "ip_address" in txn and txn["ip_address"]:
-                f["ips"].add(txn["ip_address"])
-                
-        if to_acc in feature_dict:
-            f = feature_dict[to_acc]
-            f["total_in"] += amount
-            f["txn_count"] += 1
-            f["fan_in_set"].add(from_acc)
-            f["in_txns"].append((ts, amount))
-            if is_structured:
-                f["structuring_count"] += 1
-            if is_round:
-                f["round_amount_count"] += 1
-            if "location" in txn and txn["location"]:
-                f["locations"].add(txn["location"])
-            if "device_used" in txn and txn["device_used"]:
-                f["devices"].add(txn["device_used"])
-            if "ip_address" in txn and txn["ip_address"]:
-                f["ips"].add(txn["ip_address"])
+# ---------------------------------------------------------------------------
+# Canonical ML feature list — ORDER MATTERS for model serialisation
+# ---------------------------------------------------------------------------
+ML_FEATURES: list[str] = [
+    "total_in",
+    "total_out",
+    "txn_count",
+    "fan_in",
+    "fan_out",
+    "pass_through_ratio",
+    "flow_imbalance",
+    "round_amount_ratio",
+    "structuring_score",
+    "avg_in",
+    "avg_out",
+    "max_in",
+    "max_out",
+]
 
-    # NetworkX Graph construction for centrality
-    G = nx.DiGraph()
-    for acc_id in accounts.keys():
-        G.add_node(acc_id)
-        
-    # Aggregate transfers for weighted edges
-    edges_agg = {}
-    for txn in transactions:
-        key = (txn["from_account"], txn["to_account"])
-        edges_agg[key] = edges_agg.get(key, 0.0) + float(txn["amount"])
-        
-    for (src, tgt), wt in edges_agg.items():
-        if src in accounts and tgt in accounts:
-            G.add_edge(src, tgt, weight=wt)
-            
-    # Calculate centralities
-    try:
-        betweenness = nx.betweenness_centrality(G, normalized=True)
-    except Exception:
-        betweenness = {acc_id: 0.0 for acc_id in accounts.keys()}
-        
-    in_degree = dict(G.in_degree())
-    out_degree = dict(G.out_degree())
-    
-    # Compile final features
-    rows = []
-    for acc_id, f in feature_dict.items():
-        total_in = f["total_in"]
-        total_out = f["total_out"]
-        txn_count = f["txn_count"]
-        
-        # 1. pass_through_ratio
-        pass_through_ratio = total_out / total_in if total_in > 0 else 0.0
-        # Clamp to realistic levels (can go slightly above 1 if account depletes initial balance)
-        pass_through_ratio = min(1.5, pass_through_ratio)
-        
-        # 2. mean_time_to_forward & mule_ratio
-        in_txns = sorted(f["in_txns"], key=lambda x: x[0])
-        out_txns = sorted(f["out_txns"], key=lambda x: x[0])
-        
-        forward_times = []
-        forwarded_count = 0
-        
-        # For each incoming transaction, find if there's an outgoing transaction
-        # that happens after it, within a 24 hour window
-        for in_ts, in_amt in in_txns:
-            found_forward = False
-            for out_ts, out_amt in out_txns:
-                if out_ts > in_ts:
-                    diff_hours = (out_ts - in_ts).total_seconds() / 3600.0
-                    if diff_hours <= 24.0:
-                        # Also check if amount is relatively similar (e.g. at least 50% of incoming or similar)
-                        # We don't restrict too much, but typical mule passes most money
-                        forward_times.append(diff_hours)
-                        forwarded_count += 1
-                        found_forward = True
-                        break # match with the earliest forward
-            
-        mule_ratio = forwarded_count / len(in_txns) if len(in_txns) > 0 else 0.0
-        mean_time_to_forward = np.mean(forward_times) if forward_times else 24.0
-        
-        # 3. structuring_score & round_amount_ratio
-        structuring_score = f["structuring_count"] / txn_count if txn_count > 0 else 0.0
-        round_amount_ratio = f["round_amount_count"] / txn_count if txn_count > 0 else 0.0
-        
-        # IP sharing count
-        ip_sharing_count = 0
-        for ip in f["ips"]:
-            ip_sharing_count += len(ip_to_accounts.get(ip, set())) - 1
-            
-        rows.append({
-            "account_id": acc_id,
-            "total_in": total_in,
-            "total_out": total_out,
-            "txn_count": txn_count,
-            "fan_in": len(f["fan_in_set"]),
-            "fan_out": len(f["fan_out_set"]),
-            "pass_through_ratio": pass_through_ratio,
-            "mean_time_to_forward": mean_time_to_forward,
-            "mule_ratio": mule_ratio,
-            "structuring_score": structuring_score,
-            "round_amount_ratio": round_amount_ratio,
-            "betweenness_centrality": betweenness.get(acc_id, 0.0),
-            "in_degree": in_degree.get(acc_id, 0),
-            "out_degree": out_degree.get(acc_id, 0),
-            "unique_locations_count": len(f["locations"]) if f["locations"] else 1,
-            "unique_devices_count": len(f["devices"]) if f["devices"] else 1,
-            "unique_ips_count": len(f["ips"]) if f["ips"] else 1,
-            "ip_sharing_count": ip_sharing_count
-        })
-        
-    df = pd.DataFrame(rows)
-    return df
+
+# ---------------------------------------------------------------------------
+# Adaptive threshold helper
+# ---------------------------------------------------------------------------
+def _compute_thresholds(amounts: pd.Series) -> dict:
+    """Derive data-driven thresholds for structuring and round-amount detection.
+
+    All thresholds scale automatically with the dataset's amount distribution
+    so that feature engineering is meaningful regardless of currency or scale.
+
+    Parameters
+    ----------
+    amounts : pd.Series
+        The ``amount`` column from the full edges DataFrame (all rows).
+
+    Returns
+    -------
+    dict with keys:
+        ``struct_lower``  — lower bound of the structuring band (85th percentile)
+        ``struct_upper``  — upper bound of the structuring band (95th percentile)
+        ``round_modulus`` — divisor used to detect suspiciously round amounts
+        ``scale_label``   — human-readable scale description for logging
+
+    Notes
+    -----
+    **Structuring band** — captures amounts that sit just below the local
+    "large transaction" threshold (p85–p95).  In a PaySim-style dataset this
+    maps to ~45k–50k INR; in a low-value session dataset it maps to the
+    top-decile range of that dataset.
+
+    **Round-amount modulus** — we want amounts that are "suspiciously round"
+    for the scale.  We compute:
+        magnitude = floor(log10(p50))          e.g.  log10(138) → 2
+        round_modulus = 10 ** magnitude        e.g.  10^2 = 100
+    So for a median of ~138, amounts divisible by 100 are flagged.
+    For a median of ~50 000, amounts divisible by 10 000 are flagged.
+    Minimum modulus is 10 (never flag anything below that granularity).
+    """
+    nonzero = amounts[amounts > 0].dropna()
+
+    # --- Structuring band: p85 → p95 --------------------------------------
+    struct_lower = float(np.percentile(nonzero, 85))
+    struct_upper = float(np.percentile(nonzero, 95))
+
+    # --- Round-amount modulus ---------------------------------------------
+    median_amt = float(np.percentile(nonzero, 50))
+    if median_amt > 0:
+        magnitude = math.floor(math.log10(median_amt))   # e.g. log10(138)=2.14 → 2
+        round_modulus = max(10, 10 ** magnitude)          # e.g. 10^2 = 100
+    else:
+        round_modulus = 10
+
+    # --- Human-readable scale label for logs ------------------------------
+    max_amt = float(nonzero.max())
+    if max_amt < 1_000:
+        scale_label = "low-value (< 1k)"
+    elif max_amt < 100_000:
+        scale_label = "mid-value (1k – 100k)"
+    elif max_amt < 10_000_000:
+        scale_label = "high-value (100k – 10M)"
+    else:
+        scale_label = "very-high-value (> 10M)"
+
+    return {
+        "struct_lower":  struct_lower,
+        "struct_upper":  struct_upper,
+        "round_modulus": round_modulus,
+        "scale_label":   scale_label,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public function
+# ---------------------------------------------------------------------------
+def build_account_features(
+    edges_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Build one feature row per account from the raw transaction edge list.
+
+    Parameters
+    ----------
+    edges_df : pd.DataFrame
+        Cleaned transaction DataFrame produced by ``loader.load_and_aggregate``.
+        Must contain columns: ``from_account``, ``to_account``, ``amount``.
+
+    Returns
+    -------
+    feat_df : pd.DataFrame
+        One row per unique account. Contains ``account_id`` as a regular
+        column (not the index) plus all features in :data:`ML_FEATURES` and
+        several auxiliary columns used for downstream scoring.
+    ML_FEATURES : list[str]
+        Ordered list of column names to pass to the ML model.
+
+    Notes
+    -----
+    All NaN values produced by left-joins (accounts that only appear on one
+    side of the graph) are filled with 0 before derived features are computed.
+    Structuring and round-amount thresholds are auto-detected from the data.
+    """
+
+    # ------------------------------------------------------------------
+    # Guard: verify required columns are present
+    # ------------------------------------------------------------------
+    required = {"from_account", "to_account", "amount"}
+    missing = required - set(edges_df.columns)
+    if missing:
+        raise ValueError(
+            f"edges_df is missing required columns: {missing}. "
+            f"Found: {list(edges_df.columns)}"
+        )
+
+    # Convenience aliases
+    src = edges_df["from_account"]
+    dst = edges_df["to_account"]
+    amt = edges_df["amount"]
+
+    # ------------------------------------------------------------------
+    # AUTO-DETECT THRESHOLDS from this dataset's amount distribution
+    # ------------------------------------------------------------------
+    thresholds = _compute_thresholds(amt)
+    struct_lower  = thresholds["struct_lower"]
+    struct_upper  = thresholds["struct_upper"]
+    round_modulus = thresholds["round_modulus"]
+
+    print(f"[features] Dataset scale  : {thresholds['scale_label']}")
+    print(f"[features] Amount p50/p85/p95/max : "
+          f"{np.percentile(amt[amt>0], 50):.2f} / "
+          f"{struct_lower:.2f} / {struct_upper:.2f} / {amt.max():.2f}")
+    print(f"[features] Structuring band : [{struct_lower:.2f}, {struct_upper:.2f}]")
+    print(f"[features] Round modulus    : {round_modulus:,}  "
+          f"(flags amounts divisible by {round_modulus:,})")
+
+    # ==================================================================
+    # STEP 1 — IN-FLOW AGGREGATION  (group by to_account)
+    # ==================================================================
+    in_grp = edges_df.groupby("to_account", sort=False)
+
+    in_agg = in_grp["amount"].agg(
+        total_in="sum",
+        txn_in_count="count",
+        avg_in="mean",
+        max_in="max",
+    )
+
+    # Number of distinct senders to each receiving account
+    in_agg["unique_senders"] = in_grp["from_account"].nunique()
+
+    # ------------------------------------------------------------------
+    # STEP 2 — OUT-FLOW AGGREGATION  (group by from_account)
+    # ------------------------------------------------------------------
+    out_grp = edges_df.groupby("from_account", sort=False)
+
+    out_agg = out_grp["amount"].agg(
+        total_out="sum",
+        txn_out_count="count",
+        avg_out="mean",
+        max_out="max",
+    )
+
+    # Number of distinct receivers from each sending account
+    out_agg["unique_receivers"] = out_grp["to_account"].nunique()
+
+    # ------------------------------------------------------------------
+    # STEP 3 — STRUCTURING SCORE
+    # Amounts in the [struct_lower, struct_upper] band are suspicious —
+    # they sit just below the "large transaction" threshold for this
+    # dataset, mimicking classic structuring / smurfing behaviour.
+    # ------------------------------------------------------------------
+    struct_mask = amt.between(struct_lower, struct_upper)
+    struct_txns = (
+        edges_df.loc[struct_mask]
+        .groupby("from_account", sort=False)
+        .size()
+        .rename("structuring_txns")
+    )
+
+    # ------------------------------------------------------------------
+    # STEP 4 — ROUND AMOUNT RATIO
+    # Amounts divisible by round_modulus (auto-scaled to dataset) are
+    # a red flag for manufactured / scripted transfers.
+    # Ratio = round_txn_count / (txn_out_count + 1)
+    # ------------------------------------------------------------------
+    round_mask  = (amt % round_modulus == 0)
+    round_counts = (
+        edges_df.loc[round_mask]
+        .groupby("from_account", sort=False)
+        .size()
+        .rename("round_txn_count")
+    )
+
+    # ------------------------------------------------------------------
+    # STEP 5 — BUILD MASTER FEATURE TABLE
+    # Index = union of all unique account IDs across both graph sides
+    # ------------------------------------------------------------------
+    all_accounts = pd.Index(
+        pd.concat([src, dst]).unique(), name="account_id"
+    )
+    feat_df = pd.DataFrame(index=all_accounts)
+
+    # Left-join in-flow stats (indexed by to_account)
+    feat_df = feat_df.join(in_agg, how="left")
+
+    # Left-join out-flow stats (indexed by from_account)
+    feat_df = feat_df.join(out_agg, how="left")
+
+    # Left-join structuring counts (indexed by from_account)
+    feat_df = feat_df.join(struct_txns, how="left")
+
+    # Left-join round-amount counts (indexed by from_account)
+    feat_df = feat_df.join(round_counts, how="left")
+
+    # Fill NaN → 0 (accounts only seen on one side of the graph)
+    feat_df = feat_df.fillna(0)
+
+    # ------------------------------------------------------------------
+    # STEP 6 — DERIVED FEATURES
+    # ------------------------------------------------------------------
+
+    # Degree signals (fan-in / fan-out)
+    feat_df["fan_in"]  = feat_df["unique_senders"]
+    feat_df["fan_out"] = feat_df["unique_receivers"]
+
+    # Combined transaction volume
+    feat_df["txn_count"] = feat_df["txn_in_count"] + feat_df["txn_out_count"]
+
+    # Pass-through ratio — fraction of received money immediately re-sent.
+    # Clipped to [0, 1]. High value (≈1) = transit / mule behaviour.
+    feat_df["pass_through_ratio"] = np.where(
+        feat_df["total_in"] > 0,
+        (feat_df["total_out"] / feat_df["total_in"]).clip(0, 1),
+        0.0,
+    )
+
+    # Flow imbalance — low value = equal in & out = shell account signal.
+    # Range [0, 1]; 0 = perfectly balanced (suspicious), 1 = one-sided.
+    feat_df["flow_imbalance"] = (
+        (feat_df["total_in"] - feat_df["total_out"]).abs()
+        / (feat_df["total_in"] + feat_df["total_out"] + 1.0)
+    )
+
+    # Structuring score — normalised by outgoing transaction count
+    feat_df["structuring_score"] = (
+        feat_df["structuring_txns"] / (feat_df["txn_out_count"] + 1.0)
+    )
+
+    # Round amount ratio — normalised by outgoing transaction count
+    feat_df["round_amount_ratio"] = (
+        feat_df["round_txn_count"] / (feat_df["txn_out_count"] + 1.0)
+    )
+
+    # ------------------------------------------------------------------
+    # STEP 7 — Enforce ML_FEATURES are all present (safety check)
+    # ------------------------------------------------------------------
+    for col in ML_FEATURES:
+        if col not in feat_df.columns:
+            raise RuntimeError(
+                f"BUG: expected feature column '{col}' was not built. "
+                "Check the aggregation steps above."
+            )
+
+    # ------------------------------------------------------------------
+    # STEP 8 — RETURN
+    # Reset index so account_id becomes a regular column
+    # ------------------------------------------------------------------
+    feat_df = feat_df.reset_index()  # account_id → regular column
+
+    # ------------------------------------------------------------------
+    # Summary diagnostics
+    # ------------------------------------------------------------------
+    n_accounts = len(feat_df)
+    n_features  = len(ML_FEATURES)
+
+    pt_high  = int((feat_df["pass_through_ratio"] > 0.9).sum())
+    st_high  = int((feat_df["structuring_score"]   > 0.3).sum())
+    rnd_high = int((feat_df["round_amount_ratio"]  > 0.3).sum())
+
+    print(f"Feature matrix: {n_accounts:,} accounts × {n_features} features")
+    print(f"Pass-through > 0.9      : {pt_high:,} accounts")
+    print(f"Structuring score > 0.3 : {st_high:,} accounts")
+    print(f"Round amount ratio > 0.3: {rnd_high:,} accounts")
+
+    return feat_df, ML_FEATURES

@@ -7,3 +7,5 @@ networkx
 faker
 pydantic
 python-multipart
+pyarrow
+fastparquet

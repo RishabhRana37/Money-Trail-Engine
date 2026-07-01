@@ -1,39 +1,11 @@
-# Python byte-compiled / optimized / DLL files
 __pycache__/
-*.py[cod]
-*$py.class
 *.pyc
 *.pyo
-
-# Virtual Environment
-.venv/
+*.pyd
+artifacts/*.parquet
+artifacts/*.pkl
+artifacts/*.json
+dataset_small.csv
 venv/
-env/
-ENV/
-
-# Distribution / packaging
-.eggs/
-dist/
-build/
-*.egg-info/
-
-# Environment variables
 .env
-.env.*
-
-# IDE
-.vscode/
-.idea/
-*.suo
-*.user
-
-# OS files
 .DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Database / local state
-*.db
-*.sqlite3

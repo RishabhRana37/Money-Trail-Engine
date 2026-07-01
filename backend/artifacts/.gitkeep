@@ -1,0 +1,6 @@
+# artifacts/.gitkeep
+# This directory stores trained model artifacts:
+#   - model.pkl          (trained Random Forest)
+#   - feature_stats.json (per-account aggregation stats)
+#   - transactions.parquet (processed dataset cache)
+# All artifact files are git-ignored via backend/.gitignore

@@ -1,362 +1,393 @@
-import networkx as nx
+"""
+engine/patterns.py
+==================
+Graph-based money-laundering pattern detection.
+
+Builds a directed transaction graph (DiGraph) from the edge list and
+runs five detection passes to surface suspicious topologies:
+
+    1. build_graph             — aggregate edges → nx.DiGraph
+    2. compute_centrality      — betweenness centrality per node
+    3. detect_circular_patterns — cyclic laundering loops
+    4. detect_fan_patterns     — high fan-in / fan-out hubs
+    5. detect_rapid_movement   — pass-through / mule accounts
+    6. build_alerts            — consolidate all patterns into alert dicts
+
+Imports: networkx, pandas, numpy
+"""
+
+import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Set, Tuple
+import networkx as nx
 
-def check_cycle_flow(cycle: List[str], transactions: List[Dict[str, Any]]) -> Tuple[bool, float]:
+
+# ---------------------------------------------------------------------------
+# FUNCTION 1 — build_graph
+# ---------------------------------------------------------------------------
+def build_graph(
+    edges_df: pd.DataFrame,
+    suspicious_accounts: set,
+) -> nx.DiGraph:
+    """Build a directed transaction graph restricted to suspicious accounts.
+
+    Aggregates individual transactions into weighted edges (sum of amount,
+    count of transactions), then keeps only edges where at least one endpoint
+    is in *suspicious_accounts*.
+
+    Parameters
+    ----------
+    edges_df : pd.DataFrame
+        Cleaned edge list with columns ``from_account``, ``to_account``,
+        ``amount`` (at minimum).
+    suspicious_accounts : set
+        Set of account IDs flagged by the anomaly or feature stage.
+        Only edges touching these accounts are included in the graph.
+
+    Returns
+    -------
+    nx.DiGraph
+        Directed graph where each edge carries ``amount`` (total INR/USD
+        transferred) and ``txn_count`` (number of raw transactions) attributes.
     """
-    Checks if there is a chronological flow of funds through the cycle
-    within a 72-hour window, with matching amounts (within 25% tolerance).
-    Returns (isValid, amount_involved).
-    """
-    k = len(cycle)
-    step_txns = []
-    for i in range(k):
-        u = cycle[i]
-        v = cycle[(i + 1) % k]
-        txs = [t for t in transactions if t["from_account"] == u and t["to_account"] == v]
-        if not txs:
-            return False, 0.0
-        parsed = []
-        for t in txs:
-            try:
-                dt = datetime.strptime(t["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
-            except ValueError:
-                dt = datetime.fromisoformat(t["timestamp"].replace("Z", "+00:00")).replace(tzinfo=None)
-            parsed.append((dt, float(t["amount"])))
-        step_txns.append(sorted(parsed, key=lambda x: x[0]))
-        
-    def dfs(step: int, prev_time: datetime, initial_amount: float, current_min_amount: float) -> Tuple[bool, float]:
-        if step == k:
-            return True, current_min_amount
-            
-        for dt, amt in step_txns[step]:
-            if dt >= prev_time:
-                if (dt - prev_time).total_seconds() <= 86400:
-                    if 0.75 * initial_amount <= amt <= 1.3 * initial_amount:
-                        success, final_amt = dfs(step + 1, dt, initial_amount, min(current_min_amount, amt))
-                        if success:
-                            return True, final_amt
-        return False, 0.0
+    # ── Aggregate multi-edges into single weighted edges ──────────────────
+    agg = (
+        edges_df
+        .groupby(["from_account", "to_account"], sort=False)
+        .agg(amount=("amount", "sum"), txn_count=("amount", "count"))
+        .reset_index()
+    )
 
-    for start_time, start_amt in step_txns[0]:
-        success, amount_involved = dfs(1, start_time, start_amt, start_amt)
-        if success:
-            return True, amount_involved
-            
-    return False, 0.0
+    # ── Filter: keep only rows touching at least one suspicious account ───
+    mask = (
+        agg["from_account"].isin(suspicious_accounts) |
+        agg["to_account"].isin(suspicious_accounts)
+    )
+    agg = agg[mask]
 
-
-def check_chain_flow(chain: List[str], transactions: List[Dict[str, Any]]) -> Tuple[bool, float]:
-    """
-    Checks if there is a chronological flow of funds through the chain
-    within a 48-hour window, with matching amounts.
-    """
-    k = len(chain)
-    step_txns = []
-    for i in range(k - 1):
-        u = chain[i]
-        v = chain[i + 1]
-        txs = [t for t in transactions if t["from_account"] == u and t["to_account"] == v]
-        if not txs:
-            return False, 0.0
-        parsed = []
-        for t in txs:
-            try:
-                dt = datetime.strptime(t["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
-            except ValueError:
-                dt = datetime.fromisoformat(t["timestamp"].replace("Z", "+00:00")).replace(tzinfo=None)
-            parsed.append((dt, float(t["amount"])))
-        step_txns.append(sorted(parsed, key=lambda x: x[0]))
-        
-    def dfs(step: int, prev_time: datetime, initial_amount: float, current_min_amount: float) -> Tuple[bool, float]:
-        if step == k - 1:
-            return True, current_min_amount
-            
-        for dt, amt in step_txns[step]:
-            if dt >= prev_time:
-                if (dt - prev_time).total_seconds() <= 86400:
-                    if 0.75 * initial_amount <= amt <= 1.3 * initial_amount:
-                        success, final_amt = dfs(step + 1, dt, initial_amount, min(current_min_amount, amt))
-                        if success:
-                            return True, final_amt
-        return False, 0.0
-
-    for start_time, start_amt in step_txns[0]:
-        success, amount_involved = dfs(1, start_time, start_amt, start_amt)
-        if success:
-            return True, amount_involved
-            
-    return False, 0.0
-
-
-def detect_patterns(
-    accounts: Dict[str, Dict[str, Any]],
-    transactions: List[Dict[str, Any]],
-    features_df: pd.DataFrame
-) -> List[Dict[str, Any]]:
-    
-    alerts = []
-    alert_counter = 1
-    
-    # 1. Build NetworkX Directed Graph
+    # ── Build DiGraph ─────────────────────────────────────────────────────
     G = nx.DiGraph()
-    for acc_id in accounts.keys():
-        G.add_node(acc_id)
-        
-    edges_agg = {}
-    edges_last_ts = {}
-    edges_txn_count = {}
-    
-    for txn in transactions:
-        u = txn["from_account"]
-        v = txn["to_account"]
-        amt = float(txn["amount"])
-        ts = txn["timestamp"]
-        
-        key = (u, v)
-        edges_agg[key] = edges_agg.get(key, 0.0) + amt
-        edges_txn_count[key] = edges_txn_count.get(key, 0) + 1
-        
-        if key not in edges_last_ts or ts > edges_last_ts[key]:
-            edges_last_ts[key] = ts
-            
-    for (u, v), wt in edges_agg.items():
-        if u in accounts and v in accounts:
-            G.add_edge(u, v, weight=wt, txn_count=edges_txn_count[(u, v)], last_timestamp=edges_last_ts[(u, v)])
-            
-    # Pre-map features for fast lookup
-    features_map = features_df.set_index("account_id").to_dict(orient="index")
-    
-    current_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    if transactions:
-        current_ts = transactions[-1]["timestamp"]
-
-    # ---- 1. Circular Flow Detection ----
-    try:
-        cycles = list(nx.simple_cycles(G, length_bound=6))
-    except Exception:
-        cycles = []
-        
-    seen_cycles = set()
-    deduped_cycles = []
-    for cycle in cycles:
-        if len(cycle) >= 3:
-            min_val = min(cycle)
-            min_idx = cycle.index(min_val)
-            canonical = tuple(cycle[min_idx:] + cycle[:min_idx])
-            if canonical not in seen_cycles:
-                seen_cycles.add(canonical)
-                deduped_cycles.append(cycle)
-                
-    for cycle in deduped_cycles:
-        isValid, amount_involved = check_cycle_flow(cycle, transactions)
-        if not isValid:
-            continue
-            
-        severity = min(100, int(85 + (amount_involved / 25000.0) + len(cycle) * 2))
-        
-        alert_id = f"alert_{alert_counter:02d}"
-        alert_counter += 1
-        
-        summary = f"{amount_involved/100000.0:.2f}L cycled through {len(cycle)} accounts returning to origin."
-        narrative = (
-            f"Funds cycled through a closed loop of {len(cycle)} accounts: "
-            + " -> ".join([f"{accounts[node]['name']} ({node})" for node in cycle])
-            + f" -> {accounts[cycle[0]]['name']} ({cycle[0]}). This loop displays no apparent commercial utility "
-            f"and is highly characteristic of circular money laundering (layering)."
+    for row in agg.itertuples(index=False):
+        G.add_edge(
+            row.from_account,
+            row.to_account,
+            amount=row.amount,
+            txn_count=row.txn_count,
         )
-        
-        alerts.append({
-            "alert_id": alert_id,
-            "pattern_type": "circular",
-            "title": f"{len(cycle)}-account laundering loop",
-            "severity": severity,
-            "account_ids": cycle,
-            "amount_involved": round(amount_involved, 2),
-            "summary": summary,
-            "narrative": narrative,
-            "detected_at": current_ts,
-            "roles": {node: "origin" if i == 0 else "mule" for i, node in enumerate(cycle)}
-        })
 
-    # ---- 2. Layering Chain Detection ----
-    mule_nodes = [node for node, feats in features_map.items() if feats.get("mule_ratio", 0.0) > 0.6]
-    mule_sub = G.subgraph(mule_nodes)
-    layering_chains = []
-    
-    visited: Set[str] = set()
-    for start_node in mule_nodes:
-        if start_node in visited:
-            continue
-            
-        current_path = [start_node]
-        curr = start_node
-        while True:
-            out_neighbors = list(mule_sub.successors(curr))
-            if not out_neighbors:
-                break
-            next_node = max(out_neighbors, key=lambda n: G[curr][n]["weight"])
-            if next_node in current_path:
-                break
-            current_path.append(next_node)
-            curr = next_node
-            
-        if len(current_path) >= 3:
-            layering_chains.append(current_path)
-            visited.update(current_path)
-            
-    for chain in layering_chains:
-        isValid, amount_involved = check_chain_flow(chain, transactions)
-        if not isValid:
-            continue
-            
-        severity = min(100, int(80 + (amount_involved / 25000.0) + len(chain) * 2))
-        
-        alert_id = f"alert_{alert_counter:02d}"
-        alert_counter += 1
-        
-        summary = f"{amount_involved/100000.0:.2f}L layered through a sequential chain of {len(chain)} accounts."
-        narrative = (
-            f"A rapid flow of funds was detected across a linear path: "
-            + " -> ".join([f"{accounts[node]['name']} ({node})" for node in chain])
-            + f". Each account forwarded over 90% of incoming funds within a short window, "
-            f"suggesting a layering pipeline designed to obscure the source of funds."
+    print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+    return G
+
+
+# ---------------------------------------------------------------------------
+# FUNCTION 2 — compute_centrality
+# ---------------------------------------------------------------------------
+def compute_centrality(G: nx.DiGraph, k: int = 500) -> dict:
+    """Compute approximate betweenness centrality for all nodes in *G*.
+
+    Uses a k-sample approximation (Brandes algorithm) on the undirected
+    projection of *G* for efficiency on large graphs.
+
+    Parameters
+    ----------
+    G : nx.DiGraph
+        Directed transaction graph produced by :func:`build_graph`.
+    k : int, optional
+        Number of pivot nodes sampled for the approximation (default 500).
+        Higher k → more accurate but slower.
+
+    Returns
+    -------
+    dict
+        Mapping ``{node_id: centrality_score}`` where scores are normalised
+        to [0, 1] (1 = node sits on the most shortest paths in the graph).
+    """
+    # Work on the undirected projection so both sender and receiver roles
+    # contribute to a node's centrality score.
+    U = G.to_undirected()
+
+    # Clamp k to the number of nodes to avoid ValueError on small graphs
+    k_eff = min(k, U.number_of_nodes())
+
+    centrality = nx.betweenness_centrality(U, k=k_eff, normalized=True)
+
+    print(f"Centrality computed for {len(centrality)} nodes")
+    return centrality
+
+
+# ---------------------------------------------------------------------------
+# FUNCTION 3 — detect_circular_patterns
+# ---------------------------------------------------------------------------
+def detect_circular_patterns(
+    G: nx.DiGraph,
+    max_len: int = 6,
+    cap: int = 500,
+) -> list[list[str]]:
+    """Detect cyclic laundering loops in the directed graph.
+
+    A circular pattern (A → B → C → A) is a classic money-laundering
+    topology used to obscure the origin of funds through repeated cycling.
+
+    Parameters
+    ----------
+    G : nx.DiGraph
+        Directed transaction graph.
+    max_len : int, optional
+        Maximum cycle length to include (default 6). Self-loops (length 1)
+        and trivial back-edges (length 2) are excluded.
+    cap : int, optional
+        Stop collecting after this many cycles to bound runtime (default 500).
+
+    Returns
+    -------
+    list[list[str]]
+        Each inner list is one cycle: an ordered sequence of account ID
+        strings. The cycle wraps back to the first element.
+    """
+    cycles: list[list[str]] = []
+
+    for cycle in nx.simple_cycles(G):
+        if len(cycles) >= cap:
+            break
+        # Exclude trivial cycles (self-loops, length-2 back-edges)
+        if 2 < len(cycle) <= max_len:
+            cycles.append([str(n) for n in cycle])
+
+    print(f"Circular patterns found: {len(cycles)}")
+    return cycles
+
+
+# ---------------------------------------------------------------------------
+# FUNCTION 4 — detect_fan_patterns
+# ---------------------------------------------------------------------------
+def detect_fan_patterns(
+    G: nx.DiGraph,
+    percentile: int = 95,
+) -> tuple[set, set]:
+    """Identify high fan-in and high fan-out hub accounts.
+
+    Fan-in hubs (aggregators) collect money from many senders — a signal
+    for collection accounts in smurfing networks.
+    Fan-out hubs (distributors) send to many receivers — a signal for
+    layering / dispersion accounts.
+
+    Parameters
+    ----------
+    G : nx.DiGraph
+        Directed transaction graph.
+    percentile : int, optional
+        Degree percentile threshold (default 95). Nodes above this
+        threshold in in-degree or out-degree are flagged.
+
+    Returns
+    -------
+    fan_in_accounts : set
+        Account IDs whose in-degree exceeds the *percentile*-th percentile.
+    fan_out_accounts : set
+        Account IDs whose out-degree exceeds the *percentile*-th percentile.
+    """
+    nodes = list(G.nodes())
+
+    in_degrees  = np.array([G.in_degree(n)  for n in nodes])
+    out_degrees = np.array([G.out_degree(n) for n in nodes])
+
+    fan_in_threshold  = float(np.percentile(in_degrees,  percentile))
+    fan_out_threshold = float(np.percentile(out_degrees, percentile))
+
+    fan_in_accounts  = {
+        nodes[i] for i, d in enumerate(in_degrees)  if d > fan_in_threshold
+    }
+    fan_out_accounts = {
+        nodes[i] for i, d in enumerate(out_degrees) if d > fan_out_threshold
+    }
+
+    print(
+        f"Fan-in accounts: {len(fan_in_accounts)}, "
+        f"Fan-out accounts: {len(fan_out_accounts)}"
+    )
+    return fan_in_accounts, fan_out_accounts
+
+
+# ---------------------------------------------------------------------------
+# FUNCTION 5 — detect_rapid_movement
+# ---------------------------------------------------------------------------
+def detect_rapid_movement(
+    feat_df: pd.DataFrame,
+    threshold: float = 0.85,
+) -> set:
+    """Detect rapid pass-through (mule) accounts.
+
+    These accounts receive funds and immediately forward the majority
+    onward — a key indicator of money-mule behaviour in layering schemes.
+
+    Parameters
+    ----------
+    feat_df : pd.DataFrame
+        Account feature DataFrame from ``features.build_account_features``.
+        Must contain ``account_id`` and ``pass_through_ratio`` columns.
+    threshold : float, optional
+        Minimum pass-through ratio to flag an account (default 0.85).
+        An account forwarding ≥ 85% of everything it receives is flagged.
+
+    Returns
+    -------
+    set
+        Account IDs with ``pass_through_ratio > threshold``.
+    """
+    mask   = feat_df["pass_through_ratio"] > threshold
+    rapid  = set(feat_df.loc[mask, "account_id"].tolist())
+
+    print(f"Rapid movement accounts: {len(rapid)}")
+    return rapid
+
+
+# ---------------------------------------------------------------------------
+# FUNCTION 6 — build_alerts
+# ---------------------------------------------------------------------------
+def build_alerts(
+    cycles: list[list[str]],
+    fan_in_accounts: set,
+    fan_out_accounts: set,
+    rapid_accounts: set,
+    G: nx.DiGraph,
+    feat_df: pd.DataFrame,
+) -> list[dict]:
+    """Consolidate all detected patterns into structured alert dictionaries.
+
+    Each alert represents one detected money-laundering pattern and carries
+    enough metadata for the frontend to render a detailed alert card and
+    highlight the involved accounts on the graph canvas.
+
+    Parameters
+    ----------
+    cycles : list[list[str]]
+        Circular cycles returned by :func:`detect_circular_patterns`.
+    fan_in_accounts : set
+        High fan-in hubs returned by :func:`detect_fan_patterns`.
+    fan_out_accounts : set
+        High fan-out distributors returned by :func:`detect_fan_patterns`.
+    rapid_accounts : set
+        Mule accounts returned by :func:`detect_rapid_movement`.
+    G : nx.DiGraph
+        Directed graph (used to look up edge amounts for circular alerts).
+    feat_df : pd.DataFrame
+        Account feature DataFrame (used to aggregate amounts for hub alerts).
+
+    Returns
+    -------
+    list[dict]
+        Alert dicts sorted by ``severity`` descending, re-numbered as
+        ``alert_0001``, ``alert_0002``, … The dict schema is::
+
+            {
+                "alert_id":        str,
+                "pattern_type":    str,   # circular | fan_in | fan_out | rapid
+                "account_ids":     list[str],
+                "amount_involved": float,
+                "severity":        int,   # 0–100
+                "title":           str,
+                "summary":         str,
+            }
+    """
+    alerts: list[dict] = []
+
+    # ── Circular alerts (one per detected cycle) ──────────────────────────
+    n_circular = 0
+    for i, cycle in enumerate(cycles):
+        # Sum amounts along the cycle edges (wrap-around: last → first)
+        amount_involved = round(
+            sum(
+                G[cycle[j]][cycle[(j + 1) % len(cycle)]].get("amount", 0.0)
+                for j in range(len(cycle))
+                if G.has_edge(cycle[j], cycle[(j + 1) % len(cycle)])
+            ),
+            2,
         )
-        
+        severity = min(100, 65 + len(cycle) * 5)
+
         alerts.append({
-            "alert_id": alert_id,
-            "pattern_type": "layering",
-            "title": f"Layering chain of {len(chain)} accounts",
-            "severity": severity,
-            "account_ids": chain,
-            "amount_involved": round(amount_involved, 2),
-            "summary": summary,
-            "narrative": narrative,
-            "detected_at": current_ts,
-            "roles": {node: "origin" if i == 0 else ("beneficiary" if i == len(chain)-1 else "mule") for i, node in enumerate(chain)}
+            "alert_id":        f"_tmp_{i}",          # re-numbered at the end
+            "pattern_type":    "circular",
+            "account_ids":     cycle,
+            "amount_involved": amount_involved,
+            "severity":        severity,
+            "title":           f"{len(cycle)}-account laundering loop",
+            "summary": (
+                f"₹{amount_involved / 100_000:.1f}L cycled through "
+                f"{len(cycle)} accounts."
+            ),
         })
+        n_circular += 1
 
-    # ---- 3. Smurfing / Fan-out Detection ----
-    for node, feats in features_map.items():
-        if feats.get("out_degree", 0) >= 5:
-            out_edges = G.out_edges(node, data=True)
-            structured_targets = []
-            total_smurfed = 0.0
-            
-            for u, v, data in out_edges:
-                edge_txns = [t for t in transactions if t["from_account"] == u and t["to_account"] == v]
-                for t in edge_txns:
-                    amt = float(t["amount"])
-                    if 45000.0 <= amt < 50000.0:
-                        structured_targets.append(v)
-                        total_smurfed += amt
-                        break
-                        
-            if len(structured_targets) >= 4:
-                alert_id = f"alert_{alert_counter:02d}"
-                alert_counter += 1
-                
-                account_ids = [node] + list(set(structured_targets))
-                severity = min(100, int(85 + len(structured_targets) * 2 + (total_smurfed / 50000.0)))
-                
-                summary = f"{total_smurfed/100000.0:.2f}L split into {len(structured_targets)} transfers under 50,000 INR."
-                narrative = (
-                    f"Account {accounts[node]['name']} ({node}) initiated {len(structured_targets)} separate transfers "
-                    f"to different counterparties, with each transfer structured just below the 50,000 INR "
-                    f"reporting threshold. This is a typical smurfing/fan-out technique to evade transaction monitoring filters."
-                )
-                
-                alerts.append({
-                    "alert_id": alert_id,
-                    "pattern_type": "smurfing",
-                    "title": f"Structuring via smurfing fan-out",
-                    "severity": severity,
-                    "account_ids": account_ids,
-                    "amount_involved": round(total_smurfed, 2),
-                    "summary": summary,
-                    "narrative": narrative,
-                    "detected_at": current_ts,
-                    "roles": {n: "origin" if n == node else "mule" for n in account_ids}
-                })
+    # ── Fan-in alert (one aggregate alert for all hub collectors) ─────────
+    n_fan_in = 0
+    if fan_in_accounts:
+        amt = round(
+            float(
+                feat_df[feat_df["account_id"].isin(fan_in_accounts)]["total_in"].sum()
+            ),
+            2,
+        )
+        alerts.append({
+            "alert_id":        "_tmp_fan_in",
+            "pattern_type":    "fan_in",
+            "account_ids":     list(fan_in_accounts)[:20],
+            "amount_involved": amt,
+            "severity":        75,
+            "title":           f"{len(fan_in_accounts)} high fan-in collector accounts",
+            "summary":         "Accounts receiving from an unusually large number of senders.",
+        })
+        n_fan_in = 1
 
-    # ---- 4. Fan-in Detection ----
-    for node, feats in features_map.items():
-        if accounts[node]["account_type"] == "business":
-            continue
-            
-        if feats.get("in_degree", 0) >= 6:
-            in_edges = G.in_edges(node, data=True)
-            senders = [u for u, v, data in in_edges]
-            total_incoming = feats.get("total_in", 0.0)
-            
-            if total_incoming > 250000.0:
-                alert_id = f"alert_{alert_counter:02d}"
-                alert_counter += 1
-                
-                account_ids = [node] + senders
-                severity = min(100, int(80 + len(senders) * 2 + (total_incoming / 100000.0)))
-                
-                summary = f"{total_incoming/100000.0:.2f}L collected from {len(senders)} source accounts."
-                narrative = (
-                    f"Collector account {accounts[node]['name']} ({node}) received rapid incoming transfers "
-                    f"aggregating {total_incoming:,.2f} INR from {len(senders)} distinct counterparties. "
-                    f"This pattern is typical of a consolidation node/collection mule."
-                )
-                
-                alerts.append({
-                    "alert_id": alert_id,
-                    "pattern_type": "fan_in",
-                    "title": "Consolidation fan-in flow",
-                    "severity": severity,
-                    "account_ids": account_ids,
-                    "amount_involved": round(total_incoming, 2),
-                    "summary": summary,
-                    "narrative": narrative,
-                    "detected_at": current_ts,
-                    "roles": {n: "beneficiary" if n == node else "mule" for n in account_ids}
-                })
+    # ── Fan-out alert (one aggregate alert for all distributors) ──────────
+    n_fan_out = 0
+    if fan_out_accounts:
+        amt = round(
+            float(
+                feat_df[feat_df["account_id"].isin(fan_out_accounts)]["total_out"].sum()
+            ),
+            2,
+        )
+        alerts.append({
+            "alert_id":        "_tmp_fan_out",
+            "pattern_type":    "fan_out",
+            "account_ids":     list(fan_out_accounts)[:20],
+            "amount_involved": amt,
+            "severity":        72,
+            "title":           f"{len(fan_out_accounts)} high fan-out distributor accounts",
+            "summary":         "Accounts sending to an unusually large number of receivers.",
+        })
+        n_fan_out = 1
 
-    # ---- 5. Rapid Movement (Mule) Detection ----
-    for node, feats in features_map.items():
-        mule_ratio = feats.get("mule_ratio", 0.0)
-        pass_through_ratio = feats.get("pass_through_ratio", 0.0)
-        total_in = feats.get("total_in", 0.0)
-        
-        if mule_ratio > 0.9 and 0.85 <= pass_through_ratio <= 1.25 and total_in > 200000.0:
-            in_edges = G.in_edges(node, data=True)
-            out_edges = G.out_edges(node, data=True)
-            
-            if in_edges and out_edges:
-                best_src = max(in_edges, key=lambda x: x[2]["weight"])[0]
-                best_dest = max(out_edges, key=lambda x: x[2]["weight"])[1]
-                
-                alert_id = f"alert_{alert_counter:02d}"
-                alert_counter += 1
-                
-                account_ids = [best_src, node, best_dest]
-                severity = min(100, int(85 + (total_in / 50000.0)))
-                
-                summary = f"Mule pass-through: {total_in/100000.0:.2f}L routed through {accounts[node]['name']} within 24h."
-                narrative = (
-                    f"Rapid pass-through node identified: {accounts[node]['name']} ({node}) received "
-                    f"funds from {accounts[best_src]['name']} ({best_src}) and immediately forwarded "
-                    f"them to {accounts[best_dest]['name']} ({best_dest}) within 24 hours. The account behaves "
-                    f"as a classic money mule with no normal personal/business transactional signature."
-                )
-                
-                alerts.append({
-                    "alert_id": alert_id,
-                    "pattern_type": "rapid_movement",
-                    "title": "Rapid mule transit",
-                    "severity": severity,
-                    "account_ids": account_ids,
-                    "amount_involved": round(total_in, 2),
-                    "summary": summary,
-                    "narrative": narrative,
-                    "detected_at": current_ts,
-                    "roles": {best_src: "origin", node: "mule", best_dest: "beneficiary"}
-                })
+    # ── Rapid movement alert (one aggregate alert for mule accounts) ──────
+    n_rapid = 0
+    if rapid_accounts:
+        amt = round(
+            float(
+                feat_df[feat_df["account_id"].isin(rapid_accounts)]["total_out"].sum()
+            ),
+            2,
+        )
+        alerts.append({
+            "alert_id":        "_tmp_rapid",
+            "pattern_type":    "rapid",
+            "account_ids":     list(rapid_accounts)[:20],
+            "amount_involved": amt,
+            "severity":        78,
+            "title":           f"{len(rapid_accounts)} rapid pass-through (mule) accounts",
+            "summary":         "Accounts forwarding 85%+ of received funds immediately.",
+        })
+        n_rapid = 1
 
-    alerts.sort(key=lambda x: x["severity"], reverse=True)
+    # ── Sort by severity descending and re-number IDs ─────────────────────
+    alerts.sort(key=lambda a: a["severity"], reverse=True)
+    for idx, alert in enumerate(alerts, start=1):
+        alert["alert_id"] = f"alert_{idx:04d}"
+
+    print(
+        f"Total alerts built: {len(alerts)} "
+        f"(circular: {n_circular}, "
+        f"fan_in: {n_fan_in}, "
+        f"fan_out: {n_fan_out}, "
+        f"rapid: {n_rapid})"
+    )
     return alerts
