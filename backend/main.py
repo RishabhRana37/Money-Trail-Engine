@@ -354,7 +354,7 @@ async def analyze(body: AnalyzeBody = AnalyzeBody()):
 # ENDPOINT 3 — GET /stats
 # ---------------------------------------------------------------------------
 @app.get("/stats", tags=["Dashboard"])
-async def stats(dataset_id: Optional[str] = Query(None)):
+async def stats(dataset_id: str = Query("ds_001")):
     """Return dashboard KPI statistics."""
     high_risk_ids = set(
         ACCOUNTS[ACCOUNTS["risk_score"] >= 70]["account_id"].tolist()
@@ -394,7 +394,7 @@ async def stats(dataset_id: Optional[str] = Query(None)):
 # ---------------------------------------------------------------------------
 @app.get("/accounts", tags=["Accounts"])
 async def list_accounts(
-    dataset_id: Optional[str]  = Query(None),
+    dataset_id: Optional[str]  = Query("ds_001"),
     sort:       Optional[str]  = Query("risk_desc"),
     min_risk:   Optional[int]  = Query(0),
     limit:      int            = Query(50, ge=1, le=200),
@@ -428,7 +428,7 @@ async def list_accounts(
 @app.get("/accounts/{account_id}", tags=["Accounts"])
 async def get_account(
     account_id: str,
-    dataset_id: Optional[str] = Query(None),
+    dataset_id: Optional[str] = Query("ds_001"),
 ):
     """Retrieve full account detail with SHAP-lite explanation."""
     if account_id not in ACCOUNT_INDEX:
@@ -499,7 +499,7 @@ async def get_account(
 # ---------------------------------------------------------------------------
 @app.get("/graph", tags=["Graph"])
 async def get_graph(
-    dataset_id: Optional[str] = Query(None),
+    dataset_id: Optional[str] = Query("ds_001"),
     account_id: Optional[str] = Query(None),
     alert_id:   Optional[str] = Query(None),
     depth:      int           = Query(2, ge=1, le=3),
@@ -577,7 +577,7 @@ async def get_graph(
 # ---------------------------------------------------------------------------
 @app.get("/alerts", tags=["Alerts"])
 async def list_alerts(
-    dataset_id:   Optional[str] = Query(None),
+    dataset_id:   Optional[str] = Query("ds_001"),
     min_severity: int           = Query(0, ge=0, le=100),
     pattern_type: Optional[str] = Query(None),
 ):
@@ -603,7 +603,7 @@ async def list_alerts(
 @app.get("/alerts/{alert_id}", tags=["Alerts"])
 async def get_alert(
     alert_id:   str,
-    dataset_id: Optional[str] = Query(None),
+    dataset_id: Optional[str] = Query("ds_001"),
 ):
     """Return full alert detail including subgraph and narrative."""
     alert = next((a for a in ALERTS if a["alert_id"] == alert_id), None)
