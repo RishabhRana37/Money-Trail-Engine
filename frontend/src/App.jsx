@@ -5,9 +5,11 @@ import Dashboard from './pages/Dashboard';
 import GraphView from './pages/GraphView';
 import AccountDetail from './pages/AccountDetail';
 import AlertsView from './pages/AlertsView';
+import RingGraph from './pages/RingGraph';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import { api } from './api';
+import { ToastContainer } from './components/Toast';
 
 function App() {
   const [datasetId, setDatasetId] = useState('ds_001');
@@ -145,7 +147,7 @@ function App() {
           path="/ring/:alertId"
           element={
             isAuthenticated
-              ? <ConsoleLayout><GraphView /></ConsoleLayout>
+              ? <ConsoleLayout><RingGraph /></ConsoleLayout>
               : <Navigate to="/login" replace />
           }
         />
@@ -169,6 +171,7 @@ function App() {
         {/* ── Fallback ─────────────────────────────────────────────── */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <ToastContainer />
     </BrowserRouter>
   );
 }

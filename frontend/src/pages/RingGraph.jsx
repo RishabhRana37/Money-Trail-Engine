@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
-import { getGraph, getAccount } from '../api';
+import { getGraphByAlert, getAlert, getAccount } from '../api';
 import RiskBadge from '../components/RiskBadge';
 import { useToast } from '../components/Toast';
 
@@ -15,18 +15,18 @@ const riskColor = (level) => {
   }
 };
 
-export default function GraphView() {
+export default function RingGraph() {
+  const { alertId } = useParams();
   const navigate = useNavigate();
-  const { accountId } = useParams();
   const showToast = useToast();
   
   const fgRef = useRef();
   const containerRef = useRef(null);
 
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
+  const [alertInfo, setAlertInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [depth, setDepth] = useState(2);
   const [isMounted, setIsMounted] = useState(false);
 
   // Selected Account state for slide-over panel
@@ -35,6 +35,12 @@ export default function GraphView() {
 
   // Container dimensions
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+
+  // Replay animation states
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [replayLinks, setReplayLinks] = useState([]);
+  const [allLinks, setAllLinks] = useState([]);
+  const intervalRef = useRef(null);
 
   useEffect(() => {
     setIsMounted(true);
@@ -58,30 +64,97 @@ export default function GraphView() {
     }
   }, []);
 
-  const loadGraphData = async () => {
+  const loadRingData = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      const targetId = accountId || 'USR_44397'; // Default fallback
-      const data = await getGraph(targetId, depth);
-      
+      const [graphRes, alertRes] = await Promise.all([
+        getGraphByAlert(alertId),
+        getAlert(alertId)
+      ]);
+
+      const sortedEdges = [...(graphRes.edges || [])].sort((a, b) => b.txn_count - a.txn_count);
+      setAllLinks(sortedEdges);
+
       setGraphData({
-        nodes: data.nodes || [],
-        links: data.edges || []
+        nodes: graphRes.nodes || [],
+        links: sortedEdges
       });
-      showToast(`Showing ${(data.nodes || []).length} nodes, ${(data.edges || []).length} edges`, "info");
+      setAlertInfo(alertRes);
+
+      const amount = alertRes?.amount_involved || 0;
+      const formattedAmount = (amount / 100000).toFixed(2) + 'L';
+      showToast(`Ring loaded — ₹${formattedAmount} involved`, "success");
     } catch (err) {
       console.error(err);
-      setError('Could not load graph. Try another account.');
+      setError('Could not load ring details.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadGraphData();
-  }, [accountId, depth]);
+    setIsPlaying(false);
+    setReplayLinks([]);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    loadRingData();
+  }, [alertId]);
+
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
+
+  const startReplay = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+
+    setReplayLinks([]);
+    setIsPlaying(true);
+
+    let currentIndex = allLinks.length - 1;
+
+    intervalRef.current = setInterval(() => {
+      if (currentIndex >= 0) {
+        const link = allLinks[currentIndex];
+        if (link) {
+          const cleanLink = {
+            ...link,
+            source: typeof link.source === 'object' ? link.source.id : link.source,
+            target: typeof link.target === 'object' ? link.target.id : link.target
+          };
+          setReplayLinks((prev) => [...prev, cleanLink]);
+        }
+        currentIndex--;
+      } else {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        setIsPlaying(false);
+
+        const amount = alertInfo?.amount_involved || 0;
+        const formattedAmount = (amount / 100000).toFixed(2) + 'L';
+        const numAccounts = alertInfo?.account_ids?.length || 0;
+        showToast(`Ring complete — ₹${formattedAmount} cycled through ${numAccounts} accounts`, "success");
+      }
+    }, 600);
+  };
+
+  const stopReplay = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    setReplayLinks(allLinks);
+    setIsPlaying(false);
+  };
 
   const handleNodeClick = async (node) => {
     try {
@@ -98,75 +171,85 @@ export default function GraphView() {
       ref={containerRef} 
       className={`transition-opacity duration-100 ease-in-out ${isMounted ? 'opacity-100' : 'opacity-0'} flex-1 w-full h-full min-h-[90vh] relative bg-aura-bg select-none`}
     >
-      {/* Controls - Floating top-left */}
-      <div className="absolute top-4 left-4 z-10 flex gap-2">
-        {[1, 2, 3].map((hop) => (
+      {/* Replay Controls - Floating top-right */}
+      {!loading && !error && (
+        <div className="absolute top-4 right-4 z-10">
           <button
-            key={hop}
-            onClick={() => setDepth(hop)}
-            className={`px-3 py-1.5 font-mono text-xs border border-aura-border rounded-full transition-all ${
-              depth === hop
-                ? 'bg-white text-black font-bold'
-                : 'bg-black/60 text-white hover:bg-black/80'
-            }`}
+            onClick={isPlaying ? stopReplay : startReplay}
+            className="px-4 py-2 font-mono text-xs font-bold border border-aura-border bg-black/60 hover:bg-black/85 text-white rounded-full transition-all flex items-center gap-2 cursor-pointer"
           >
-            {hop} {hop === 1 ? 'hop' : 'hops'}
+            {isPlaying ? (
+              <>
+                <span className="text-[#E24B4A]">⏹</span> Stop
+              </>
+            ) : (
+              <>
+                <span className="text-[#00E5FF]">▶</span> Replay ring
+              </>
+            )}
           </button>
-        ))}
-      </div>
+        </div>
+      )}
 
-      {/* Legend - Bottom-left */}
-      <div className="absolute bottom-4 left-4 z-10 hud-panel p-3 bg-black/80 border border-aura-border text-[10px] font-mono space-y-2 select-none">
-        <div className="font-bold text-white uppercase tracking-wider mb-1">Risk Legend</div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#E24B4A]" />
-            <span>Critical</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#F0883E]" />
-            <span>High</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#D29922]" />
-            <span>Medium</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#3FB950]" />
-            <span>Low</span>
-          </div>
-        </div>
-        <div className="border-t border-aura-border/40 pt-1.5 flex items-center gap-2">
-          <span className="w-6 h-[2px] bg-[#E24B4A]" />
-          <span>Suspicious Flow</span>
-        </div>
+      {/* Back button and Info Banner */}
+      <div className="absolute top-4 left-4 z-10 flex flex-col gap-3 max-w-xl">
+        <button
+          onClick={() => navigate('/alerts')}
+          className="px-3 py-1.5 font-mono text-xs border border-aura-border bg-black/60 text-white hover:bg-black/80 rounded transition-all w-fit"
+        >
+          ← Back to alerts
+        </button>
+
+        {alertInfo && (
+          <>
+            <div className="bg-[#FAEEDA] border border-[#F0883E]/30 text-[#854F0B] p-4 font-mono shadow-lg space-y-2 rounded">
+              <span className="text-[10px] font-bold block uppercase">[ALERT_LOCK: {alertId}]</span>
+              <h2 className="text-sm font-bold text-black">{alertInfo.title}</h2>
+              <p className="text-xs">{alertInfo.summary}</p>
+            </div>
+            {alertInfo.narrative && (
+              <p className="text-xs text-aura-textMuted italic pl-1">
+                {alertInfo.narrative}
+              </p>
+            )}
+          </>
+        )}
       </div>
 
       {/* Loading overlay */}
       {loading && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-aura-bg/80 gap-3">
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-aura-bg/85 gap-3">
           <svg className="animate-spin h-6 w-6 text-aura-accent" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
-          <span className="text-xs font-mono text-aura-textMuted uppercase tracking-widest">Building money trail...</span>
+          <span className="text-xs font-mono text-aura-textMuted uppercase tracking-widest">Loading ring...</span>
         </div>
       )}
 
       {/* Error overlay */}
       {error && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-aura-bg/90 p-4">
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-aura-bg/95 p-4">
           <span className="text-red-400 font-mono text-sm uppercase tracking-wider">{error}</span>
         </div>
       )}
 
-      {/* Force-directed Graph Canvas */}
+      {/* Graph Canvas */}
       {!loading && graphData.nodes.length > 0 && (
         <ForceGraph2D
           ref={fgRef}
           width={dimensions.width}
           height={dimensions.height}
-          graphData={graphData}
+          graphData={{
+            nodes: graphData.nodes.map(n => ({ ...n })),
+            links: (isPlaying ? replayLinks : allLinks)
+              .filter(Boolean)
+              .map(l => ({
+                ...l,
+                source: typeof l.source === 'object' ? l.source.id : l.source,
+                target: typeof l.target === 'object' ? l.target.id : l.target
+              }))
+          }}
           backgroundColor="transparent"
           nodeId="id"
           nodeLabel="label"
@@ -187,7 +270,7 @@ export default function GraphView() {
         />
       )}
 
-      {/* Side Dossier Panel */}
+      {/* Slide-over panel */}
       <div 
         className={`fixed right-0 top-0 h-full w-80 bg-aura-panel/95 border-l border-aura-border shadow-2xl z-40 transform transition-transform duration-250 ease-out p-6 flex flex-col justify-between ${
           isPanelOpen ? 'translate-x-0' : 'translate-x-full'

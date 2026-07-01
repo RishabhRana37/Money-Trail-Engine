@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../api';
-import RiskBadge from '../components/RiskBadge';
+import { useNavigate } from 'react-router-dom';
+import { getAlerts } from '../api';
 
 function formatIndianCurrency(amount) {
   if (amount >= 10000000) {
@@ -16,84 +15,45 @@ function formatIndianCurrency(amount) {
   return `₹${amount.toLocaleString('en-IN')}`;
 }
 
-function SeverityPill({ score }) {
-  let style = "bg-slate-800 text-slate-300 border-slate-700/50";
-  if (score >= 90) style = "bg-[#FCEBEB] text-[#A32D2D] border-[#E24B4A]/20";
-  else if (score >= 70) style = "bg-[#FAEEDA] text-[#854F0B] border-[#F0883E]/20";
-  else if (score >= 40) style = "bg-[#FAEEDA] text-[#634000] border-[#D29922]/20";
-  else style = "bg-[#EAF3DE] text-[#3B6D11] border-[#3FB950]/20";
-  
-  return (
-    <span className={`inline-flex items-center justify-center font-mono text-[10px] font-bold px-2 py-0.5 border rounded-full ${style}`}>
-      {score}
-    </span>
-  );
-}
-
-export default function AlertsView({ datasetId }) {
+export default function AlertsView() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const initialType = searchParams.get('type') || '';
-
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
-  // Filter states
-  const [selectedType, setSelectedType] = useState(initialType);
+
   const [minSeverity, setMinSeverity] = useState(0);
+  const [patternType, setPatternType] = useState(null);
+  const [isMounted, setIsMounted] = useState(false);
 
-  const patternTypes = [
-    { id: '', label: 'All' },
-    { id: 'circular', label: 'Circular' },
-    { id: 'layering', label: 'Layering' },
-    { id: 'smurfing', label: 'Smurfing' },
-    { id: 'rapid_movement', label: 'Rapid movement' },
-    { id: 'fan_in', label: 'Fan-in' },
-    { id: 'fan_out', label: 'Fan-out' },
-  ];
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
-  const fetchAlerts = async () => {
+  const fetchAlertsData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await api.getAlerts({
-        datasetId,
-        min_severity: minSeverity,
-        pattern_type: selectedType || undefined
-      });
+      const res = await getAlerts(minSeverity, patternType);
       setAlerts(res.alerts || []);
     } catch (err) {
       console.error(err);
-      setError('Failed to fetch alerts list.');
+      setError('Failed to load alerts');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAlerts();
-  }, [datasetId, selectedType, minSeverity]);
+    fetchAlertsData();
+  }, [minSeverity, patternType]);
 
-  const handleTypeSelect = (type) => {
-    setSelectedType(type);
-    if (type) {
-      setSearchParams({ type });
-    } else {
-      setSearchParams({});
-    }
-  };
-
-  const getSeverityBorder = (score) => {
-    if (score >= 90) return 'border-l-4 border-l-aura-critical';
-    if (score >= 70) return 'border-l-4 border-l-aura-high';
-    if (score >= 40) return 'border-l-4 border-l-aura-medium';
-    return 'border-l-4 border-l-aura-low';
+  const handleClearFilters = () => {
+    setMinSeverity(0);
+    setPatternType(null);
   };
 
   return (
-    <div className="flex-1 p-6 space-y-6 max-w-7xl mx-auto w-full text-aura-textLight font-mono select-none">
-      
+    <div className={`transition-opacity duration-100 ease-in-out ${isMounted ? 'opacity-100' : 'opacity-0'} flex-1 p-6 space-y-6 max-w-5xl mx-auto w-full text-aura-textLight font-mono select-none`}>
       {/* Title */}
       <div className="border-b border-aura-border pb-4">
         <h1 className="text-xl font-bold text-white tracking-widest uppercase">Anomaly Threat Directory</h1>
@@ -101,125 +61,125 @@ export default function AlertsView({ datasetId }) {
       </div>
 
       {error && (
-        <div className="p-3 border border-aura-critical/30 bg-aura-critical/10 text-aura-critical text-xs">
-          &gt; ERROR: {error}
+        <div className="p-3 border border-red-500/30 bg-red-500/10 text-red-400 text-xs text-center uppercase tracking-wide">
+          {error}
         </div>
       )}
 
-      {/* Grid workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        
-        {/* Sidebar Filters */}
-        <div className="space-y-6 lg:col-span-1 hud-panel p-5 shadow-lg h-fit">
-          <span className="hud-corner-tl">[TRIAGE_CONSOLE]</span>
-          
-          {/* Pattern Chips */}
-          <div className="space-y-2.5 mt-1">
-            <label className="text-[9px] text-aura-textMuted uppercase font-bold">Threat Pattern Type</label>
-            <div className="flex flex-col gap-1.5">
-              {patternTypes.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => handleTypeSelect(p.id)}
-                  className={`w-full text-left px-3 py-1.5 border text-[10px] font-bold tracking-wider transition-all ${
-                    selectedType === p.id 
-                      ? 'bg-aura-accent/10 border-aura-accent text-aura-accent' 
-                      : 'bg-black/20 border-aura-border/40 text-aura-textMuted hover:border-aura-border hover:text-white'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Severity Slider */}
-          <div className="space-y-2 pt-2 border-t border-aura-border/40">
-            <div className="flex justify-between items-center text-[9px] font-bold text-aura-textMuted">
-              <span>MIN_SEVERITY</span>
-              <span className="text-white">{minSeverity.toString().padStart(3, '0')}</span>
-            </div>
-            <input 
-              type="range"
-              min="0"
-              max="100"
-              value={minSeverity}
-              onChange={(e) => setMinSeverity(Number(e.target.value))}
-              className="w-full h-1 bg-aura-border rounded-none appearance-none cursor-pointer accent-aura-accent"
-            />
-            <div className="flex justify-between text-[8px] text-aura-textMuted">
-              <span>LOW</span>
-              <span>CRIT</span>
-            </div>
-          </div>
+      {/* Filter Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-aura-panel/50 border border-aura-border rounded">
+        {/* Pattern chips */}
+        <div className="flex-1 overflow-x-auto scrollbar-none flex items-center gap-2 pb-2 md:pb-0">
+          {[
+            { id: null, label: 'All' },
+            { id: 'circular', label: 'circular' },
+            { id: 'layering', label: 'layering' },
+            { id: 'smurfing', label: 'smurfing' },
+            { id: 'rapid_movement', label: 'rapid movement' },
+            { id: 'fan_in', label: 'fan-in' },
+            { id: 'fan_out', label: 'fan-out' }
+          ].map(chip => (
+            <button
+              key={chip.id}
+              onClick={() => setPatternType(chip.id)}
+              className={`px-3 py-1.5 border text-xs font-bold whitespace-nowrap rounded transition-all ${
+                patternType === chip.id
+                  ? 'bg-white text-black border-white'
+                  : 'bg-transparent border-aura-border/60 text-aura-textMuted hover:text-white hover:border-white'
+              }`}
+            >
+              {chip.label}
+            </button>
+          ))}
         </div>
 
-        {/* Alerts List */}
-        <div className="lg:col-span-3 space-y-4">
-          <div className="flex items-center justify-between text-[9px] text-aura-textMuted pb-1">
-            <span>QUERY_RESULT: {alerts.length.toString().padStart(3, '0')} THREATS MATCHED</span>
-            <span>SYSTEM: ONLINE</span>
-          </div>
+        {/* Severity Slider */}
+        <div className="flex items-center gap-3 text-xs font-mono min-w-[240px]">
+          <span className="text-aura-textMuted whitespace-nowrap">Min severity: {minSeverity}</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="10"
+            value={minSeverity}
+            onChange={(e) => setMinSeverity(Number(e.target.value))}
+            className="w-full accent-aura-accent bg-black/40 border border-aura-border h-1 rounded-lg appearance-none cursor-pointer"
+          />
+        </div>
+      </div>
 
-          {loading ? (
-            <div className="h-64 flex flex-col items-center justify-center gap-3">
-              <svg className="animate-spin h-5 w-5 text-aura-accent" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              <span className="text-[10px] text-aura-textMuted">SEARCHING CHANNELS...</span>
+      {/* Main List */}
+      <div className="space-y-4">
+        {loading ? (
+          // 3 Skeleton placeholders
+          Array.from({ length: 3 }).map((_, idx) => (
+            <div key={idx} className="p-5 border border-aura-border bg-aura-panel/40 animate-pulse space-y-3 h-40">
+              <div className="flex items-center gap-3">
+                <div className="h-5 bg-gray-700 rounded w-12"></div>
+                <div className="h-5 bg-gray-700 rounded w-24"></div>
+                <div className="h-5 bg-gray-700 rounded flex-1"></div>
+              </div>
+              <div className="h-4 bg-gray-700 rounded w-full"></div>
+              <div className="h-4 bg-gray-700 rounded w-5/6"></div>
             </div>
-          ) : alerts.length === 0 ? (
-            <div className="p-12 text-center border border-aura-border bg-black/20 text-aura-textMuted text-xs shadow">
-              &gt; NO ANOMALIES RECORDED MATCHING THRESHOLDS.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {alerts.map(alert => (
+          ))
+        ) : alerts.length === 0 ? (
+          /* Empty State */
+          <div className="p-12 text-center border border-aura-border bg-black/20 text-aura-textMuted text-xs flex flex-col items-center gap-3">
+            <span>No alerts match this filter</span>
+            <button
+              onClick={handleClearFilters}
+              className="px-3 py-1.5 bg-aura-accent/15 border border-aura-accent/40 text-xs font-mono font-bold text-aura-accent hover:bg-aura-accent/30 active:scale-95 transition-all"
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {alerts.map(alert => {
+              const score = alert.severity || 0;
+              const severityBg = score >= 90 ? 'bg-[#E24B4A] text-white' : score >= 70 ? 'bg-[#F0883E] text-white' : 'bg-slate-800 text-slate-300';
+              return (
                 <div
                   key={alert.alert_id}
-                  onClick={() => navigate(`/graph?alertId=${alert.alert_id}`)}
-                  className={`p-5 hud-panel hover:bg-aura-panelLight/40 hover:border-aura-accent/50 cursor-pointer transition-all duration-200 shadow-lg ${getSeverityBorder(alert.severity)}`}
+                  onClick={() => navigate(`/ring/${alert.alert_id}`)}
+                  className="p-5 border border-aura-border bg-aura-panel/60 hover:bg-aura-panelLight/40 hover:border-aura-accent/50 cursor-pointer transition-all duration-200 relative"
                 >
                   <span className="hud-corner-tl">[LOG_DOCKET: {alert.alert_id}]</span>
                   
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-aura-border/40 pb-3 mb-3 mt-1">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <SeverityPill score={alert.severity} />
-                        <span className="inline-flex text-[8px] font-bold border border-aura-indigo/40 bg-aura-indigo/5 text-aura-indigo px-1.5 py-0.2 tracking-wider">
-                          {alert.pattern_type.replace('_', ' ').toUpperCase()}
-                        </span>
-                        <span className="font-bold text-white text-sm">{alert.title}</span>
-                      </div>
+                    <div className="flex-1 flex items-center gap-2 flex-wrap">
+                      {/* Severity number pill */}
+                      <span className={`inline-flex items-center justify-center font-mono text-[10px] font-bold px-2 py-0.5 rounded-full ${severityBg}`}>
+                        {score}
+                      </span>
+                      {/* Pattern Type badge */}
+                      <span className="inline-flex text-[9px] font-bold border border-aura-border/60 bg-black/40 text-aura-textMuted px-1.5 py-0.5 rounded uppercase">
+                        {alert.pattern_type.replace('_', ' ')}
+                      </span>
+                      {/* Title */}
+                      <span className="font-medium text-white text-sm flex-1">{alert.title}</span>
                     </div>
+                    {/* Amount */}
                     <span className="text-xs font-mono text-aura-textMuted font-bold">
-                      {formatIndianCurrency(alert.amount_involved)} involved
+                      {formatIndianCurrency(alert.amount_involved)}
                     </span>
                   </div>
                   
+                  {/* Summary */}
                   <p className="text-xs text-aura-textLight leading-relaxed">{alert.summary}</p>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 pt-3 border-t border-aura-border/40 text-[10px] text-aura-textMuted">
-                    <div>
-                      <span className="block text-[8px]">EXPOSED_VOLUME</span>
-                      <span className="font-bold text-white text-xs">{formatIndianCurrency(alert.amount_involved)}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[8px]">ONTOLOGY_MEMBERS</span>
-                      <span className="font-bold text-white text-xs">{(alert.account_ids || []).length} NODES</span>
-                    </div>
-                    <div className="sm:text-right">
-                      <span className="block text-[8px]">TIME_COMMITTED</span>
-                      <span className="font-bold text-white text-xs">{new Date(alert.detected_at).toLocaleString()}</span>
-                    </div>
+                  {/* Footer details */}
+                  <div className="flex items-center justify-between mt-4 pt-3 border-t border-aura-border/40 text-[10px] text-aura-textMuted">
+                    <span>EXPOSURE: {formatIndianCurrency(alert.amount_involved)}</span>
+                    <span className="font-bold text-white uppercase">{ (alert.account_ids || []).length } accounts</span>
+                    <span>CAPTURED: {new Date(alert.detected_at).toLocaleDateString()}</span>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

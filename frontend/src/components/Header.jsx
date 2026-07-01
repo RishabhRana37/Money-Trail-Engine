@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { NavLink, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import NavBar from './NavBar';
 
 export default function Header({ currentDataset, onResetDataset, isGenerating }) {
   const [sysTime, setSysTime] = useState('');
@@ -20,9 +21,6 @@ export default function Header({ currentDataset, onResetDataset, isGenerating })
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
-
-  const activeClass = "flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold text-aura-accent border-b-2 border-aura-accent bg-aura-accent/5 transition-all";
-  const inactiveClass = "flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold text-aura-textMuted border-b-2 border-transparent hover:text-aura-textLight hover:border-aura-border transition-all";
 
   return (
     <header className="border-b border-aura-border bg-aura-panel/90 backdrop-blur-md sticky top-0 z-40 select-none">
@@ -68,15 +66,8 @@ export default function Header({ currentDataset, onResetDataset, isGenerating })
             </div>
           </div>
 
-          {/* Navigation Links */}
-          <nav className="flex h-14">
-            <NavLink to="/" className={({ isActive }) => isActive ? activeClass : inactiveClass}>
-              DASHBOARD
-            </NavLink>
-            <NavLink to="/alerts" className={({ isActive }) => isActive ? activeClass : inactiveClass}>
-              THREAT_FEED
-            </NavLink>
-          </nav>
+          {/* Navigation Bar */}
+          <NavBar />
 
           {/* Right Controls */}
           <div className="flex items-center gap-4">
