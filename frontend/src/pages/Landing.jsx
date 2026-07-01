@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import Lenis from 'lenis';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { ScrollToPlugin } from 'gsap/ScrollToPlugin';
 import * as THREE from 'three';
 
 import dashboardScreenshot from '../assets/dashboard_screenshot.png';
 import graphScreenshot from '../assets/graph_screenshot.png';
 import loginScreenshot from '../assets/login_screenshot.png';
 
-gsap.registerPlugin(ScrollTrigger);
+gsap.registerPlugin(ScrollTrigger, ScrollToPlugin);
 
 /* ── MOCK DATA FOR TACTICAL TARGETS ─────────────────────────────────────── */
 const TARGETS_DATA = [
